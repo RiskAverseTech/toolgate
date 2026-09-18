@@ -1,5 +1,7 @@
 # toolgate
 
+[![npm](https://img.shields.io/npm/v/@riskaverse/toolgate?label=npm)](https://www.npmjs.com/package/@riskaverse/toolgate) [![release](https://img.shields.io/github/v/release/RiskAverseTech/toolgate?include_prereleases&label=release)](https://github.com/RiskAverseTech/toolgate/releases) [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 **Open auto mode for AI agents.** A calibrated tool-call firewall: before your coding agent runs a risky action, toolgate asks a decision model — [TypeSafe's Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev) via [Vercel AI Gateway](https://vercel.com/changelog/typesafe-ai-jev-now-available-on-ai-gateway) — seven questions and acts on the probabilities:
 
 | Question | Catches things like |
