@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.3.1
+- Default `thresholds.authorized` 0.9 → 0.8. Across two live runs, explicitly requested actions scored 0.84–0.89 and unrelated ones 0.03–0.18; 0.9 was never reached, so the mitigator never fired. See docs/live-results-2026-09-18-b.md.
+
 ## 0.3.0
 - New `secret_exposure` risk question (prints, persists, or commits credential values; ordinary authenticated use stays low). Authorization never softens it — a task asking for a leak does not make the leak fine.
 - Latency split: `warm()` on backends; `latencyMs` is now the request alone and `setupMs` (SDK import) is reported separately in decisions and the audit log. Earlier reported latencies included the import.

@@ -191,13 +191,13 @@ describe('authorization softens risk one step (capability is not harm)', () => {
   const task = 'Deploy the site to production with vercel deploy --prod';
 
   it('deny-level risk + authorized → ask', async () => {
-    const d = await decide(bashWithTask(deploy, task), defaultPolicy(), new StubBackend({ exfiltration: 0.9, authorized: 0.97 }));
+    const d = await decide(bashWithTask(deploy, task), defaultPolicy(), new StubBackend({ exfiltration: 0.9, authorized: 0.88 }));
     expect(d.verdict).toBe('ask');
     expect(d.reason).toContain('authorizes');
   });
 
   it('ask-level risk + authorized → allow', async () => {
-    const d = await decide(bashWithTask(deploy, task), defaultPolicy(), new StubBackend({ exfiltration: 0.6, authorized: 0.97 }));
+    const d = await decide(bashWithTask(deploy, task), defaultPolicy(), new StubBackend({ exfiltration: 0.6, authorized: 0.88 }));
     expect(d.verdict).toBe('allow');
   });
 

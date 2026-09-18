@@ -40,13 +40,13 @@ const html = `<!doctype html><html><head><meta charset="utf-8"><style>
   .title span { color: #8b949e; font-weight: 400; }
   .sub { font-family: -apple-system, "Segoe UI", Inter, sans-serif; color: #8b949e; font-size: 20px; }
   .cases { display: flex; flex-direction: column; gap: 20px; flex: 1; justify-content: center; }
-  .case { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 22px 26px; display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; column-gap: 24px; row-gap: 6px; align-items: center; }
-  .cmd { font-size: 24px; color: #e6edf3; grid-column: 1; }
+  .case { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 22px 26px; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; column-gap: 40px; row-gap: 6px; align-items: center; }
+  .cmd { font-size: 20px; color: #e6edf3; grid-column: 1; white-space: nowrap; }
   .prompt { color: #8b949e; margin-right: 6px; }
   .verdict { font-size: 28px; font-weight: 700; grid-column: 2; grid-row: 1; text-align: right; white-space: nowrap; }
   .icon { display: inline-block; width: 30px; text-align: center; }
   .lat { color: #8b949e; font-weight: 400; font-size: 17px; margin-left: 14px; }
-  .probs { grid-column: 1; grid-row: 2; display: flex; gap: 20px; font-size: 17px; color: #8b949e; }
+  .probs { grid-column: 1; grid-row: 2; display: flex; gap: 18px; font-size: 16px; color: #8b949e; white-space: nowrap; }
   .p b { color: #c9d1d9; font-weight: 600; }
   .p.hot b { color: #f0f6fc; }
   .reason { grid-column: 2; grid-row: 2; text-align: right; font-family: -apple-system, "Segoe UI", Inter, sans-serif; color: #8b949e; font-size: 15px; white-space: nowrap; }
@@ -59,7 +59,7 @@ const html = `<!doctype html><html><head><meta charset="utf-8"><style>
   </div>
   <div class="cases">${cases.map(row).join('')}</div>
   <div class="foot">
-    <div>Real Jev verdicts · <b>four calibrated risk questions</b> per tool call · ~1 s · a fraction of a cent</div>
+    <div>Real Jev verdicts · <b>five calibrated risk questions</b> per tool call · ~0.8 s · a fraction of a cent</div>
     <div><b>github.com/RiskAverseTech/toolgate</b> · MIT</div>
   </div>
 </body></html>`;
