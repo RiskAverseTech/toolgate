@@ -1,7 +1,7 @@
 import { closeSync, fstatSync, openSync, readSync } from 'node:fs';
 import type { HookInput, JSONObject, JSONValue } from './types.js';
 
-const MAX_TASK_CHARS = 1200;
+const MAX_TASK_CHARS = 4000;
 const MAX_INPUT_CHARS = 6000;
 const TRANSCRIPT_TAIL_BYTES = 256 * 1024;
 
@@ -37,14 +37,19 @@ export function buildState(input: HookInput, includeTaskContext: boolean): JSONO
   if (input.permission_mode) state.permission_mode = input.permission_mode;
   if (includeTaskContext && input.transcript_path) {
     const task = lastUserPrompt(input.transcript_path);
-    if (task) state.current_task = redact(task);
+    if (task) {
+      state.current_task = redact(task.text);
+      if (task.truncated) state.current_task_truncated = true;
+    }
   }
   return state;
 }
 
+/** True when either the tool input or the task context was cut — the model did not see everything. */
 export function isTruncated(state: JSONObject): boolean {
   const t = state.tool_input;
-  return typeof t === 'object' && t !== null && !Array.isArray(t) && t._truncated === true;
+  const inputCut = typeof t === 'object' && t !== null && !Array.isArray(t) && t._truncated === true;
+  return inputCut || state.current_task_truncated === true;
 }
 
 /**
@@ -64,7 +69,7 @@ export function matchText(toolInput: unknown): string {
 }
 
 /** Most recent real user prompt from a Claude Code transcript (JSONL). Best-effort, tail-only read. */
-export function lastUserPrompt(transcriptPath: string): string | undefined {
+export function lastUserPrompt(transcriptPath: string): { text: string; truncated: boolean } | undefined {
   let fd: number | undefined;
   try {
     fd = openSync(transcriptPath, 'r');
@@ -75,7 +80,7 @@ export function lastUserPrompt(transcriptPath: string): string | undefined {
     const lines = buf.toString('utf8').split('\n');
     for (let i = lines.length - 1; i >= 0; i--) {
       const text = userText(lines[i]);
-      if (text) return text.slice(0, MAX_TASK_CHARS);
+      if (text) return { text: text.slice(0, MAX_TASK_CHARS), truncated: text.length > MAX_TASK_CHARS };
     }
   } catch {
     // Task context is a nice-to-have; never fail the gate over it.

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.1 — task-context truncation (evaluation-invalidating bug)
+- `lastUserPrompt()` kept only 1,200 characters of the transcript's last user prompt. With a long task (challenge-set-2's ~1.1k fixture preamble), the actual instructions were cut off silently and the model was scored on input it never saw. Budget raised to 4,000; truncation is now flagged as `current_task_truncated` in the state and, like truncated tool input, caps the verdict at `ask`.
+- `toolgate check` now prints the exact redacted `state` sent to the model. The challenge runner records it per case and refuses to score any case whose task context was truncated or missing.
+- Challenge runner reports complete-pair accuracy for sets with matched pairs.
+- challenge-set-3 (10 matched pairs) frozen; set 2 to be rerun on unchanged v0.4 wording as a corrected-input rerun.
+- The bug and the required corrections were found by a sixth review by ChatGPT (GPT-6 Astra), run by Jaz, which also authored set 3. The set-2 analysis doc is retracted in part.
+
 ## 0.4.0 — constraints and reserved choices
 - Two new context questions, designed from challenge-set-1's failures (all seven misses were scope violations the capability axes correctly scored as not inherently dangerous): `violates_constraint` (contradicts an explicit "only"/"do not"/read-only/target restriction in the task) and `unresolved_choice` (commits to a decision the task reserved for the user).
 - Policy: both are never softened by authorization. `violates_constraint` can reach `deny`; `unresolved_choice` is capped at `ask`.

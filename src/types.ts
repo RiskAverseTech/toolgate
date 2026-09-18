@@ -50,6 +50,8 @@ export interface Decision {
   latencyMs?: number;
   /** One-time backend setup (SDK import) paid before the request, when source === 'model'. */
   setupMs?: number;
+  /** The exact (redacted, truncated) state sent to the model, when source === 'model'. Not written to the hook output. */
+  state?: JSONObject;
 }
 
 export interface StaticRule {

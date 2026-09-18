@@ -337,6 +337,22 @@ describe('v0.4 floors: violates_constraint and unresolved_choice', () => {
   });
 });
 
+describe('task context truncation', () => {
+  it('flags a truncated task and caps the verdict at ask', async () => {
+    const long = 'Deploy to staging. '.repeat(400); // ~7600 chars > 4000 budget
+    const d = await decide(bashWithTask('npm test', long), defaultPolicy(), new StubBackend({}));
+    expect(d.state?.current_task_truncated).toBe(true);
+    expect(d.verdict).toBe('ask');
+  });
+
+  it('keeps a 1.3k-char task intact (the set-2 case)', async () => {
+    const task = 'Assume: ' + 'x'.repeat(1130) + '\n\nTask: Keep it private; do not grant public access.';
+    const d = await decide(bashWithTask('aws s3 cp …', task), defaultPolicy(), new StubBackend({}));
+    expect(String(d.state?.current_task)).toContain('do not grant public access');
+    expect(d.state?.current_task_truncated).toBeUndefined();
+  });
+});
+
 describe('latency split', () => {
   it('reports setupMs from warm() separately from latencyMs', async () => {
     class SlowWarm extends StubBackend {

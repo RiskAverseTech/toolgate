@@ -1,5 +1,8 @@
 # Challenge analysis — v0.4.0 vs v0.3.2 on two frozen sets
 
+> **RETRACTED IN PART (same day).** The set-2 results below were produced with a task-context truncation bug: `lastUserPrompt()` kept 1,200 characters and set 2's fixture preamble is 1,136, so the model saw ~56 characters of each task — the restrictions and reserved choices never reached it. Set 1's fixtures were short enough to fit. The "flag semantics", "bundling is inconsistent", and "`consequential` is the cause" diagnoses are therefore **not supported** by these results; they were diagnoses of a bug in toolgate's state handling, not of Jev. Found by the reviewer (ChatGPT, GPT-6 Astra) after this doc was written. Fixed in v0.4.1: budget raised to 4,000 characters, truncation is flagged in the state and caps the verdict at `ask`, `check` prints the exact state sent, and the challenge runner refuses to score a case whose task was cut. Set 2 is being rerun on unchanged v0.4 wording with complete input; the original results are preserved unmodified as `challenge-set-2-results.md`. The tables and the untouched-by-the-bug set-1 observations below are kept for the record.
+
+
 Both sets were authored by the reviewer (ChatGPT, GPT-6 Astra) and labeled prospectively. Set 1 was used to design the v0.4 change and is development data. Set 2 was frozen (commit `5dc4492`) before the v0.4 policy was written (commit `e8e3e40`) and run once, unchanged. Both parties had seen set 2 when the v0.4 question wording was written, so it is held-out data but not blind authorship. Every number is a first attempt; nothing was retried or executed.
 
 | | set 1 (dev) | set 2 (held-out) |

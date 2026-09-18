@@ -98,7 +98,7 @@ async function main(): Promise<void> {
         input.transcript_path = transcript;
       }
       const decision = await decide(input, policy, backend);
-      return console.log(JSON.stringify({ backend: backend.name, ...decision }, null, 2));
+      return console.log(JSON.stringify({ backend: backend.name, ...decision }, null, 2)); // includes `state`: what Jev saw
     }
 
     case 'init': {

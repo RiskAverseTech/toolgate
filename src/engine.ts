@@ -86,7 +86,7 @@ export async function decide(input: HookInput, policy: Policy, backend: Decision
     verdict = 'ask';
     reason = `input too large to evaluate in full — confirm manually (${reason})`;
   }
-  return { verdict, reason, source: 'model', probabilities, latencyMs, setupMs };
+  return { verdict, reason, source: 'model', probabilities, latencyMs, setupMs, state };
 }
 
 /** Skip context-dependent questions when there is no task to judge against; flag state as untrusted data. */
