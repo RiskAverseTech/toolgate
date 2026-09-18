@@ -1,22 +1,21 @@
-import type { Answers, DecisionBackend, Questions } from '../types.js';
+import type { Answers, DecisionBackend, JSONObject, Questions } from '../types.js';
 
 /**
- * Deterministic heuristic backend. No network, no key, no cost.
- * Used for tests, offline development, and `toolgate check --backend mock`.
- * It is intentionally crude — the point of toolgate is that a calibrated
- * decision model does this job better than regexes ever will.
+ * Deterministic heuristic backend: no network, no key, no cost. For
+ * `toolgate check --backend mock`, offline dev, and tests. Intentionally
+ * crude — the whole point of toolgate is that a calibrated decision model
+ * does this job better than regexes ever will.
  */
 export class MockBackend implements DecisionBackend {
   readonly name = 'mock';
 
-  async evaluate(state: unknown, questions: Questions): Promise<Answers> {
-    const text = JSON.stringify(state).toLowerCase();
+  async evaluate(state: JSONObject, questions: Questions): Promise<Answers> {
+    const text = JSON.stringify(state.tool_input).toLowerCase();
     const answers: Answers = {};
-    for (const [key, q] of Object.entries(questions)) {
-      if (q.type !== 'boolean') {
-        throw new Error(`MockBackend only supports boolean questions (got "${q.type}" for "${key}")`);
-      }
-      answers[key] = { type: 'boolean', probability: score(key, text) };
+    for (const key of Object.keys(questions)) {
+      let p = 0.02;
+      for (const [re, weight] of SIGNALS[key] ?? []) if (re.test(text)) p = Math.max(p, weight);
+      answers[key] = { type: 'boolean', probability: p };
     }
     return answers;
   }
@@ -24,37 +23,15 @@ export class MockBackend implements DecisionBackend {
 
 const SIGNALS: Record<string, Array<[RegExp, number]>> = {
   destructive: [
-    [/rm\s+-[a-z]*r[a-z]*f|rm\s+-[a-z]*f[a-z]*r/, 0.95],
-    [/\brm\s+/, 0.6],
-    [/drop\s+(table|database)/, 0.95],
-    [/git\s+push\s+.*--force|git\s+reset\s+--hard/, 0.8],
-    [/mkfs|dd\s+if=/, 0.97],
-    [/truncate|shred/, 0.7],
-    [/kill\s+-9|pkill/, 0.55],
+    [/\brm\b/, 0.6],
+    [/git\s+push\s+.*--force|git\s+reset\s+--hard|drop\s+(table|database)|mkfs|dd\s+if=/, 0.9],
   ],
   exfiltration: [
-    [/curl\s+[^"]*-(d|-data|f|-form|t|-upload-file)/i, 0.85],
-    [/curl\s+[^"]*-x\s*post/i, 0.8],
-    [/\.env\b.*(curl|wget|nc\s)/, 0.95],
-    [/(curl|wget|nc)\s.*\.env\b/, 0.95],
-    [/scp\s|rsync\s.*@/, 0.7],
-    [/pastebin|transfer\.sh|ngrok/, 0.85],
+    [/curl\s.*(-d|--data|-t|--upload-file|-x\s*post)/i, 0.85],
+    [/\.env\b.*(curl|wget|nc\s)|(curl|wget|nc)\s.*\.env\b/, 0.95],
   ],
   privilege: [
-    [/\bsudo\b/, 0.85],
-    [/chmod\s+(-r\s+)?[0-7]*7[0-7]*7/, 0.7],
-    [/\/etc\/(passwd|shadow|sudoers)/, 0.95],
-    [/(>>|>)\s*~?\/?\.(bashrc|zshrc|profile|ssh\/)/, 0.8],
-    [/launchctl|systemctl\s+(enable|disable)/, 0.65],
+    [/\bsudo\b|\/etc\/(passwd|shadow|sudoers)/, 0.85],
+    [/chmod\s+(-r\s+)?[0-7]*77|(>>?)\s*~?\/?\.(bashrc|zshrc|profile|ssh\/)/, 0.7],
   ],
-  off_task: [],
 };
-
-function score(questionKey: string, text: string): number {
-  const signals = SIGNALS[questionKey] ?? [];
-  let max = 0.02;
-  for (const [re, p] of signals) {
-    if (re.test(text)) max = Math.max(max, p);
-  }
-  return max;
-}

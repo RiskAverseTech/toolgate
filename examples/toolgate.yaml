@@ -1,37 +1,45 @@
 # toolgate policy — https://github.com/RiskAverseTech/toolgate
-version: 1
+# Lives at ~/.toolgate/toolgate.yaml (or $TOOLGATE_POLICY). Never read from
+# project directories, so a cloned repo can't reconfigure the firewall.
 
 backend:
   provider: gateway        # gateway | mock
   model: typesafe-ai/jev
   timeout_ms: 2500
 
-# What to do when the decision model is unreachable:
-#   passthrough = fall back to the agent's normal permission flow (default)
+# When the decision model is unreachable:
+#   passthrough = defer to the agent's normal permission flow (default)
 #   ask         = force a confirmation prompt
 #   deny        = block until the model is back
 fail_mode: passthrough
 
 thresholds:
-  deny: 0.85   # block at/above this probability
-  ask: 0.55    # prompt at/above this probability
+  deny: 0.85               # block at/above this probability
+  ask: 0.55                # prompt at/above this probability
 
-# Which tools the model evaluates (Claude Code matcher syntax).
-gated_tools: "Bash|Write|Edit|NotebookEdit|WebFetch|mcp__.*"
+# Tools the model evaluates (whole-name match; exact, a|b list, or regex).
+gated_tools: "Bash|Write|Edit|MultiEdit|NotebookEdit|WebFetch|WebSearch|mcp__.*"
 
-# Pull the current task from the transcript so 'off_task' has context.
+# Pull the current task from the transcript so `off_task` has context.
 include_task_context: true
 
 audit:
   enabled: true
   path: ~/.toolgate/audit.jsonl
-  log_input: true
+  log_input: true          # inputs are truncated and secrets redacted
 
 # Static rules run before the model — first match wins, costs nothing.
-# Uncomment to customize; these defaults are built in:
-# rules:
-#   - match: { tool: Bash, input_regex: 'rm\s+-rf\s+[/~]' }
-#     action: deny
-#     reason: Recursive delete targeting root or home
-#   - match: { tool: "Read|Glob|Grep" }
-#     action: allow
+# Rules you add here run BEFORE the built-ins (rm -rf / or ~ → deny;
+# curl | sh → ask; edits to agent safety settings → ask). Patterns match the
+# raw tool input values (quotes stripped), case-insensitively.
+rules: []
+#  - match: { tool: Bash, input_regex: 'terraform\s+destroy' }
+#    action: ask
+#    reason: Infra teardown needs a human
+
+# Extra questions are merged over the four built-ins
+# (destructive, exfiltration, privilege, off_task).
+questions: {}
+#  spends_money:
+#    type: boolean
+#    instructions: This tool call makes a purchase or changes billing.

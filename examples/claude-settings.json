@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "npx toolgate hook",
+            "command": "toolgate hook",
             "timeout": 10,
             "statusMessage": "toolgate: checking tool call"
           }

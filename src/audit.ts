@@ -1,42 +1,32 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { Decision, HookInput, Policy } from './types.js';
-import { serializeInput } from './state.js';
+import { matchText } from './state.js';
 
 const MAX_LOGGED_INPUT = 500;
+const SECRET = /\b([A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|AUTHORIZATION)[A-Z0-9_]*\s*[=:]\s*)\S+/gi;
 
-export interface AuditEntry {
-  ts: string;
-  session_id?: string;
-  tool: string;
-  input?: string;
-  verdict: Decision['verdict'];
-  source: Decision['source'];
-  rule?: string;
-  reason: string;
-  probabilities?: Record<string, number>;
-  latency_ms?: number;
-  backend?: string;
-}
-
-export function writeAudit(policy: Policy, input: HookInput, decision: Decision, backendName?: string): void {
+/** Append one JSONL line per decision. Owner-only file; secrets redacted; never throws. */
+export function writeAudit(policy: Policy, input: HookInput, decision: Decision, backend: string): void {
   if (!policy.audit.enabled) return;
   try {
-    const entry: AuditEntry = {
+    const entry = {
       ts: new Date().toISOString(),
       session_id: input.session_id,
+      agent_type: input.agent_type,
       tool: input.tool_name,
-      ...(policy.audit.log_input ? { input: serializeInput(input.tool_input).slice(0, MAX_LOGGED_INPUT) } : {}),
+      input: policy.audit.log_input
+        ? matchText(input.tool_input).slice(0, MAX_LOGGED_INPUT).replace(SECRET, '$1[redacted]')
+        : undefined,
       verdict: decision.verdict,
       source: decision.source,
-      ...(decision.rule ? { rule: decision.rule } : {}),
       reason: decision.reason,
-      ...(decision.probabilities ? { probabilities: decision.probabilities } : {}),
-      ...(decision.latencyMs !== undefined ? { latency_ms: decision.latencyMs } : {}),
-      ...(backendName ? { backend: backendName } : {}),
+      probabilities: decision.probabilities,
+      latency_ms: decision.latencyMs,
+      backend,
     };
-    mkdirSync(dirname(policy.audit.path), { recursive: true });
-    appendFileSync(policy.audit.path, JSON.stringify(entry) + '\n', 'utf8');
+    mkdirSync(dirname(policy.audit.path), { recursive: true, mode: 0o700 });
+    appendFileSync(policy.audit.path, JSON.stringify(entry) + '\n', { mode: 0o600 });
   } catch {
     // Auditing must never break the gate.
   }

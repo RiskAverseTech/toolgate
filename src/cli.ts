@@ -1,9 +1,10 @@
 #!/usr/bin/env node
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { parseArgs } from 'node:util';
 import { runHook, makeBackend } from './hook.js';
-import { loadPolicy, defaultPolicy, POLICY_FILENAME } from './policy.js';
+import { loadPolicy, policyPath } from './policy.js';
 import { decide } from './engine.js';
 import type { HookInput } from './types.js';
 
@@ -13,98 +14,98 @@ Usage:
   toolgate hook [--policy <path>] [--backend gateway|mock]
       Run as a Claude Code PreToolUse hook (JSON in on stdin).
 
-  toolgate check --tool <name> --input <json|string> [--backend gateway|mock] [--task <text>]
-      Dry-run a tool call against the current policy and print the decision.
+  toolgate check --tool <name> --input=<json|string> [--backend gateway|mock]
+      Dry-run a tool call against the policy and print the decision.
 
-  toolgate init [--global]
-      Write a starter toolgate.yaml (./ or ~/.toolgate/) and print the
-      settings.json snippet to register the hook with Claude Code.
+  toolgate init
+      Write ~/.toolgate/toolgate.yaml and print the Claude Code settings snippet.
 
   toolgate audit [-n <count>]
       Show recent audit log entries.
 
 Environment:
   AI_GATEWAY_API_KEY   Vercel AI Gateway key (gateway backend)
-  TOOLGATE_POLICY      Path to a policy file (overrides discovery)
+  TOOLGATE_POLICY      Policy file path (default ~/.toolgate/toolgate.yaml)
 `;
 
+// Bare bin on purpose: `npx toolgate` would resolve to an UNRELATED package of that name on npm.
 const SETTINGS_SNIPPET = `{
   "hooks": {
     "PreToolUse": [
       {
         "matcher": "*",
         "hooks": [
-          {
-            "type": "command",
-            "command": "npx toolgate hook",
-            "timeout": 10,
-            "statusMessage": "toolgate: checking tool call"
-          }
+          { "type": "command", "command": "toolgate hook", "timeout": 10, "statusMessage": "toolgate: checking tool call" }
         ]
       }
     ]
   }
 }`;
 
+const EXAMPLE_POLICY = join(dirname(fileURLToPath(import.meta.url)), '..', 'examples', 'toolgate.yaml');
+
 async function main(): Promise<void> {
-  const [, , cmd = 'hook', ...rest] = process.argv;
-  const args = parseArgs(rest);
+  const { values: args, positionals } = parseArgs({
+    args: process.argv.slice(2),
+    allowPositionals: true,
+    options: {
+      policy: { type: 'string' },
+      backend: { type: 'string' },
+      tool: { type: 'string' },
+      input: { type: 'string' },
+      n: { type: 'string', short: 'n', default: '20' },
+      help: { type: 'boolean', short: 'h' },
+    },
+  });
+  const cmd = positionals[0] ?? 'hook';
+  if (args.help || cmd === 'help') return console.log(HELP);
 
   switch (cmd) {
     case 'hook':
-      await runHook({ policyPath: args.policy, backend: args.backend });
-      return;
+      return runHook({ policyPath: args.policy, backend: args.backend });
 
     case 'check': {
-      if (!args.tool) fail('check requires --tool');
+      if (!args.tool) throw new Error('check requires --tool');
       const policy = loadPolicy(args.policy);
       const backend = makeBackend(policy, args.backend);
-      let toolInput: unknown = args.input ?? '';
+      const raw = args.input ?? '';
+      let toolInput: unknown;
       try {
-        toolInput = JSON.parse(args.input ?? '""');
+        toolInput = JSON.parse(raw);
       } catch {
-        toolInput = args.tool === 'Bash' ? { command: args.input } : args.input;
+        toolInput = args.tool === 'Bash' ? { command: raw } : raw;
       }
-      const input: HookInput = { tool_name: args.tool!, tool_input: toolInput, cwd: process.cwd() };
+      const input: HookInput = { tool_name: args.tool, tool_input: toolInput, cwd: process.cwd() };
       const decision = await decide(input, policy, backend);
-      console.log(JSON.stringify({ backend: backend.name, ...decision }, null, 2));
-      return;
+      return console.log(JSON.stringify({ backend: backend.name, ...decision }, null, 2));
     }
 
     case 'init': {
-      const dir = args.global !== undefined ? join(homedir(), '.toolgate') : process.cwd();
-      const path = join(dir, POLICY_FILENAME);
+      const path = policyPath(args.policy);
       if (existsSync(path)) {
         console.log(`Policy already exists: ${path}`);
       } else {
-        const { mkdirSync } = await import('node:fs');
-        mkdirSync(dir, { recursive: true });
-        writeFileSync(path, starterYaml(), 'utf8');
+        mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+        copyFileSync(EXAMPLE_POLICY, path);
         console.log(`Wrote ${path}`);
       }
-      console.log('\nAdd to your Claude Code settings (~/.claude/settings.json or .claude/settings.json):\n');
-      console.log(SETTINGS_SNIPPET);
-      return;
+      return console.log(`\nAdd to ~/.claude/settings.json:\n\n${SETTINGS_SNIPPET}`);
     }
 
     case 'audit': {
       const policy = loadPolicy(args.policy);
-      const n = Number(args.n ?? 20);
-      if (!existsSync(policy.audit.path)) {
-        console.log(`No audit log at ${policy.audit.path}`);
-        return;
-      }
-      const lines = readFileSync(policy.audit.path, 'utf8').trimEnd().split('\n');
-      for (const line of lines.slice(-n)) {
+      if (!existsSync(policy.audit.path)) return console.log(`No audit log at ${policy.audit.path}`);
+      const n = Math.max(1, Number(args.n) || 20);
+      const lines = readFileSync(policy.audit.path, 'utf8').trimEnd().split('\n').slice(-n);
+      for (const line of lines) {
         try {
           const e = JSON.parse(line);
           const probs = e.probabilities
-            ? ' ' +
-              Object.entries(e.probabilities as Record<string, number>)
+            ? Object.entries(e.probabilities as Record<string, number>)
                 .map(([k, v]) => `${k}=${v}`)
                 .join(' ')
             : '';
-          console.log(`${e.ts}  ${pad(e.verdict, 5)}  ${pad(e.tool, 10)} [${e.source}]${probs}  ${e.reason}`);
+          console.log(`${e.ts}  ${String(e.verdict).padEnd(5)}  ${String(e.tool).padEnd(10)} [${e.source}] ${probs}  ${e.reason}`);
         } catch {
           /* skip malformed lines */
         }
@@ -112,86 +113,12 @@ async function main(): Promise<void> {
       return;
     }
 
-    case 'help':
-    case '--help':
-    case '-h':
-      console.log(HELP);
-      return;
-
     default:
-      fail(`Unknown command "${cmd}"\n\n${HELP}`);
+      throw new Error(`Unknown command "${cmd}"\n\n${HELP}`);
   }
-}
-
-function starterYaml(): string {
-  const d = defaultPolicy();
-  return `# toolgate policy — https://github.com/RiskAverseTech/toolgate
-version: 1
-
-backend:
-  provider: gateway        # gateway | mock
-  model: typesafe-ai/jev
-  timeout_ms: 2500
-
-# What to do when the decision model is unreachable:
-#   passthrough = fall back to the agent's normal permission flow (default)
-#   ask         = force a confirmation prompt
-#   deny        = block until the model is back
-fail_mode: passthrough
-
-thresholds:
-  deny: ${d.thresholds.deny}   # block at/above this probability
-  ask: ${d.thresholds.ask}    # prompt at/above this probability
-
-# Which tools the model evaluates (Claude Code matcher syntax).
-gated_tools: "${d.gated_tools}"
-
-# Pull the current task from the transcript so 'off_task' has context.
-include_task_context: true
-
-audit:
-  enabled: true
-  path: ~/.toolgate/audit.jsonl
-  log_input: true
-
-# Static rules run before the model — first match wins, costs nothing.
-# Uncomment to customize; these defaults are built in:
-# rules:
-#   - match: { tool: Bash, input_regex: 'rm\\s+-rf\\s+[/~]' }
-#     action: deny
-#     reason: Recursive delete targeting root or home
-#   - match: { tool: "Read|Glob|Grep" }
-#     action: allow
-`;
-}
-
-function parseArgs(argv: string[]): Record<string, string | undefined> {
-  const out: Record<string, string | undefined> = {};
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (!a?.startsWith('--') && a !== '-n' && a !== '-h') continue;
-    const key = a.replace(/^--?/, '');
-    const next = argv[i + 1];
-    if (next !== undefined && !next.startsWith('-')) {
-      out[key] = next;
-      i++;
-    } else {
-      out[key] = '';
-    }
-  }
-  return out;
-}
-
-function pad(s: unknown, n: number): string {
-  return String(s ?? '').padEnd(n);
-}
-
-function fail(msg: string): never {
-  console.error(msg);
-  process.exit(1);
 }
 
 main().catch((err) => {
   console.error(err instanceof Error ? err.message : err);
-  process.exit(1);
+  process.exitCode = 1;
 });

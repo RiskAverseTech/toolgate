@@ -2,52 +2,86 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { defaultPolicy, loadPolicy, toolMatcherToRegex, validatePolicy } from '../src/policy.js';
+import { DEFAULT_RULES, defaultPolicy, loadPolicy, toolMatcherToRegex, validatePolicy } from '../src/policy.js';
+
+function tmpPolicy(yaml: string): string {
+  const path = join(mkdtempSync(join(tmpdir(), 'tg-')), 'toolgate.yaml');
+  writeFileSync(path, yaml);
+  return path;
+}
 
 describe('policy loading', () => {
-  it('returns defaults when no file exists', () => {
-    const p = loadPolicy(undefined, '/nonexistent');
+  it('returns defaults when the file does not exist', () => {
+    const p = loadPolicy('/nonexistent/toolgate.yaml');
     expect(p.backend.model).toBe('typesafe-ai/jev');
     expect(p.fail_mode).toBe('passthrough');
   });
 
-  it('merges a user yaml over defaults and expands ~', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'tg-'));
-    writeFileSync(
-      join(dir, 'toolgate.yaml'),
-      [
-        'thresholds:',
-        '  deny: 0.9',
-        'fail_mode: ask',
-        'audit:',
-        '  path: ~/custom/audit.jsonl',
-      ].join('\n'),
-    );
-    const p = loadPolicy(undefined, dir);
-    expect(p.thresholds.deny).toBe(0.9);
-    expect(p.thresholds.ask).toBe(defaultPolicy().thresholds.ask);
+  it('merges user values over defaults and expands ~', () => {
+    const p = loadPolicy(tmpPolicy('thresholds:\n  deny: 0.9\nfail_mode: ask\naudit:\n  path: ~/custom/audit.jsonl\n'));
+    expect(p.thresholds).toEqual({ deny: 0.9, ask: defaultPolicy().thresholds.ask });
     expect(p.fail_mode).toBe('ask');
-    expect(p.audit.path.startsWith('~')).toBe(false);
-    expect(p.audit.path.endsWith('custom/audit.jsonl')).toBe(true);
+    expect(p.audit.path).not.toMatch(/^~/);
+    expect(p.audit.path).toMatch(/custom\/audit\.jsonl$/);
   });
 
-  it('rejects invalid thresholds', () => {
+  it('user rules are prepended; built-in rules survive', () => {
+    const p = loadPolicy(tmpPolicy("rules:\n  - match: { tool: Bash, input_regex: 'terraform\\s+destroy' }\n    action: ask\n"));
+    expect(p.rules).toHaveLength(DEFAULT_RULES.length + 1);
+    expect(p.rules[0]?.match.input_regex).toContain('terraform');
+  });
+
+  it('user questions are merged over built-ins', () => {
+    const p = loadPolicy(tmpPolicy('questions:\n  spends_money:\n    type: boolean\n    instructions: Spends money.\n'));
+    expect(Object.keys(p.questions)).toEqual(expect.arrayContaining(['destructive', 'exfiltration', 'spends_money']));
+  });
+
+  it('ignores the project directory entirely (no cwd discovery)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tg-proj-'));
+    writeFileSync(join(dir, 'toolgate.yaml'), 'gated_tools: "NothingAtAll"\n');
+    const before = process.cwd();
+    process.chdir(dir);
+    try {
+      expect(loadPolicy('/nonexistent/toolgate.yaml').gated_tools).toBe(defaultPolicy().gated_tools);
+    } finally {
+      process.chdir(before);
+    }
+  });
+
+  it.each([
+    ['bad yaml', 'thresholds:\n  deny: [oops'],
+    ['non-string gated_tools', 'gated_tools: 5\n'],
+    ['rule without match', 'rules:\n  - action: deny\n'],
+    ['inverted thresholds', 'thresholds:\n  ask: 0.9\n  deny: 0.5\n'],
+    ['bad provider', 'backend:\n  provider: gatway\n'],
+  ])('rejects invalid policy: %s', (_name, yaml) => {
+    expect(() => loadPolicy(tmpPolicy(yaml))).toThrow();
+  });
+
+  it('an empty key falls back to the default instead of crashing', () => {
+    expect(loadPolicy(tmpPolicy('gated_tools:\n')).gated_tools).toBe(defaultPolicy().gated_tools);
+  });
+
+  it('allows ask: 0 (always confirm)', () => {
     const p = defaultPolicy();
-    p.thresholds = { ask: 0.9, deny: 0.5 };
-    expect(() => validatePolicy(p)).toThrow();
+    p.thresholds.ask = 0;
+    expect(() => validatePolicy(p)).not.toThrow();
   });
 });
 
-describe('tool matchers', () => {
-  it('matches exact names and pipe lists', () => {
+describe('tool matchers are always whole-name', () => {
+  it('exact and lists', () => {
     expect(toolMatcherToRegex('Bash').test('Bash')).toBe(true);
     expect(toolMatcherToRegex('Bash').test('BashOutput')).toBe(false);
     expect(toolMatcherToRegex('Edit|Write').test('Write')).toBe(true);
+    expect(toolMatcherToRegex('Edit|Write').test('MultiEdit')).toBe(false);
   });
 
-  it('supports regex matchers for MCP tools', () => {
-    expect(toolMatcherToRegex('mcp__.*').test('mcp__github__create_issue')).toBe(true);
-    expect(toolMatcherToRegex('mcp__.*').test('Bash')).toBe(false);
+  it('regex form is anchored too', () => {
+    const re = toolMatcherToRegex(defaultPolicy().gated_tools);
+    expect(re.test('mcp__github__create_issue')).toBe(true);
+    expect(re.test('BashOutput')).toBe(false);
+    expect(re.test('TodoWrite')).toBe(false);
   });
 
   it('* matches everything', () => {

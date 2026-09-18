@@ -1,177 +1,167 @@
-import { readFileSync, existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import YAML from 'yaml';
-import type { BooleanQuestion, Policy, StaticRule } from './types.js';
+import type { Policy, Questions, StaticRule } from './types.js';
 
-export const DEFAULT_QUESTIONS: Record<string, BooleanQuestion> = {
+export const DEFAULT_QUESTIONS: Questions = {
   destructive: {
     type: 'boolean',
-    instructions:
-      'Could executing this tool call permanently destroy or irreversibly modify data, files, infrastructure, or system state?',
+    instructions: 'This tool call irreversibly destroys or overwrites data, files, branches, or infrastructure.',
     criteria: {
-      true: 'deletes/overwrites files or branches, drops data, force-pushes, kills processes, or changes state that cannot be trivially undone',
-      false: 'read-only, or changes that are easy to revert (editing a working file, creating a new file)',
+      true: 'deletes or overwrites files or branches, drops data, force-pushes, kills processes, or changes state that cannot be trivially undone',
+      false: 'read-only, or easy to revert (editing a tracked file, creating a new file)',
     },
   },
   exfiltration: {
     type: 'boolean',
-    instructions:
-      'Does this tool call send potentially private or sensitive local data (source code, credentials, env vars, personal files) to an external destination?',
+    instructions: 'This tool call sends local file contents, credentials, or environment variables to a network destination.',
     criteria: {
-      true: 'uploads, POSTs, pipes, or publishes local data to a network destination or third-party service',
-      false: 'stays on the local machine, or only downloads/reads public data',
+      true: 'uploads, POSTs, pipes, or publishes local data to a network host or third-party service',
+      false: 'stays on the local machine, or only downloads or reads public data',
     },
   },
   privilege: {
     type: 'boolean',
-    instructions:
-      'Does this tool call escalate privileges or modify system configuration, credentials, permissions, or security settings?',
+    instructions: 'This tool call escalates privileges or modifies system configuration, credentials, or security settings.',
     criteria: {
-      true: 'sudo/root operations, editing shell profiles or system config, changing permissions broadly, writing to credential stores',
+      true: 'sudo/root operations, editing shell profiles or system config, broad permission changes, writing to credential stores or agent safety settings',
       false: 'ordinary user-level operations inside the project',
     },
   },
   off_task: {
     type: 'boolean',
-    instructions:
-      'Given the current task context (if provided), is this tool call clearly outside the scope of what the task plausibly requires?',
+    instructions: 'This tool call is outside the scope of the stated current task.',
     criteria: {
-      true: 'touches unrelated systems, directories, or services that the stated task gives no reason to touch',
-      false: 'plausibly in service of the stated task, or no task context is available',
+      true: 'touches unrelated systems, directories, or services that the task gives no reason to touch',
+      false: 'plausibly in service of the task',
     },
   },
 };
 
+/**
+ * Built-in static rules. Matched against the tool input's VALUES with quotes and
+ * backslashes stripped (see state.ts matchText), so patterns are written for the
+ * raw command, not JSON. All patterns avoid nested quantifiers (no ReDoS).
+ */
 export const DEFAULT_RULES: StaticRule[] = [
   {
-    match: { tool: 'Bash', input_regex: 'rm\\s+(-[a-zA-Z]*[rf][a-zA-Z]*\\s+)+["\']?(/|~/?|\\$HOME/?)["\']?(\\s|$|"|/\\*)' },
+    match: {
+      tool: 'Bash',
+      input_regex: '\\brm\\s+(?:-\\S+\\s+)*(?:/|~|\\$\\{?HOME\\}?)(?:/\\*?|\\*)?(?:\\s|$)',
+    },
     action: 'deny',
     reason: 'Recursive delete targeting root or home',
   },
   {
-    match: { tool: 'Bash', input_regex: '(curl|wget)[^|;&]*\\|\\s*(sudo\\s+)?(ba|z|da|)sh' },
+    match: {
+      tool: 'Bash',
+      input_regex: '\\b(?:curl|wget)\\b[^|]*\\|\\s*(?:sudo\\s+)?(?:/usr/bin/|/bin/)?(?:ba|z|da)?sh\\b|\\b(?:ba)?sh\\s+<\\(\\s*(?:curl|wget)\\b',
+    },
     action: 'ask',
     reason: 'Piping a remote script into a shell',
   },
   {
-    match: { tool: 'Read|Glob|Grep|TodoWrite|Task' },
-    action: 'allow',
-    reason: 'Read-only or planning tool',
+    match: {
+      tool: 'Bash|Write|Edit|MultiEdit|NotebookEdit',
+      input_regex: '\\.claude/settings|\\.toolgate\\b|toolgate\\.ya?ml',
+    },
+    action: 'ask',
+    reason: 'Modifies agent safety settings or the toolgate policy',
   },
 ];
 
 export function defaultPolicy(): Policy {
   return {
-    version: 1,
-    backend: {
-      provider: 'gateway',
-      model: 'typesafe-ai/jev',
-      timeout_ms: 2500,
-    },
+    backend: { provider: 'gateway', model: 'typesafe-ai/jev', timeout_ms: 2500 },
     fail_mode: 'passthrough',
     thresholds: { deny: 0.85, ask: 0.55 },
     rules: [...DEFAULT_RULES],
-    gated_tools: 'Bash|Write|Edit|NotebookEdit|WebFetch|mcp__.*',
+    gated_tools: 'Bash|Write|Edit|MultiEdit|NotebookEdit|WebFetch|WebSearch|mcp__.*',
     include_task_context: true,
-    audit: {
-      enabled: true,
-      path: join(homedir(), '.toolgate', 'audit.jsonl'),
-      log_input: true,
-    },
+    audit: { enabled: true, path: join(homedir(), '.toolgate', 'audit.jsonl'), log_input: true },
     questions: { ...DEFAULT_QUESTIONS },
   };
 }
 
-export const POLICY_FILENAME = 'toolgate.yaml';
-
-/** Search order: explicit path > $TOOLGATE_POLICY > ./toolgate.yaml (cwd) > ~/.toolgate/toolgate.yaml */
-export function resolvePolicyPath(explicit?: string, cwd?: string): string | undefined {
-  const candidates = [
-    explicit,
-    process.env.TOOLGATE_POLICY,
-    cwd ? join(cwd, POLICY_FILENAME) : undefined,
-    join(process.cwd(), POLICY_FILENAME),
-    join(homedir(), '.toolgate', POLICY_FILENAME),
-  ].filter((p): p is string => Boolean(p));
-  return candidates.find((p) => existsSync(p));
+/**
+ * Policy lives in ONE trusted place: an explicit path, $TOOLGATE_POLICY, or
+ * ~/.toolgate/toolgate.yaml. Deliberately no per-project discovery — a cloned
+ * repo must never be able to reconfigure the firewall.
+ */
+export function policyPath(explicit?: string): string {
+  return expandTilde(explicit ?? process.env.TOOLGATE_POLICY ?? join(homedir(), '.toolgate', 'toolgate.yaml'));
 }
 
-export function loadPolicy(path?: string, cwd?: string): Policy {
+export function loadPolicy(explicit?: string): Policy {
   const base = defaultPolicy();
-  const found = resolvePolicyPath(path, cwd);
-  if (!found) return base;
-
-  const raw = YAML.parse(readFileSync(found, 'utf8'));
-  if (!raw || typeof raw !== 'object') return base;
+  const path = policyPath(explicit);
+  if (!existsSync(path)) return base;
+  const raw = YAML.parse(readFileSync(path, 'utf8'));
+  if (raw === null || raw === undefined) return base;
+  if (typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`toolgate: ${path} must be a YAML mapping`);
   return mergePolicy(base, raw as Record<string, unknown>);
 }
 
 function mergePolicy(base: Policy, user: Record<string, unknown>): Policy {
   const merged: Policy = {
-    ...base,
-    ...pick(user, ['fail_mode', 'gated_tools', 'include_task_context']),
-    backend: { ...base.backend, ...(asObj(user.backend) ?? {}) },
-    thresholds: { ...base.thresholds, ...(asObj(user.thresholds) ?? {}) },
-    audit: { ...base.audit, ...(asObj(user.audit) ?? {}) },
-    rules: Array.isArray(user.rules) ? (user.rules as StaticRule[]) : base.rules,
-    questions: (asObj(user.questions) as Policy['questions']) ?? base.questions,
-    version: 1,
+    backend: { ...base.backend, ...obj(user.backend) },
+    fail_mode: (user.fail_mode as Policy['fail_mode']) ?? base.fail_mode,
+    thresholds: { ...base.thresholds, ...obj(user.thresholds) },
+    // User rules run first (higher priority); built-ins stay as the floor.
+    rules: [...(Array.isArray(user.rules) ? (user.rules as StaticRule[]) : []), ...base.rules],
+    gated_tools: (user.gated_tools as string) ?? base.gated_tools,
+    include_task_context: (user.include_task_context as boolean) ?? base.include_task_context,
+    audit: { ...base.audit, ...obj(user.audit) },
+    questions: { ...base.questions, ...(obj(user.questions) as Questions) },
   };
-  merged.audit.path = expandTilde(merged.audit.path);
+  merged.audit.path = expandTilde(String(merged.audit.path));
   validatePolicy(merged);
   return merged;
 }
 
 export function validatePolicy(p: Policy): void {
-  if (!['gateway', 'mock'].includes(p.backend.provider)) {
-    throw new Error(`toolgate: unknown backend provider "${p.backend.provider}"`);
-  }
-  if (!['passthrough', 'ask', 'deny'].includes(p.fail_mode)) {
-    throw new Error(`toolgate: invalid fail_mode "${p.fail_mode}"`);
-  }
+  const fail = (msg: string): never => {
+    throw new Error(`toolgate policy: ${msg}`);
+  };
+  if (!['gateway', 'mock'].includes(p.backend.provider)) fail(`unknown backend.provider "${p.backend.provider}"`);
+  if (!(Number.isFinite(p.backend.timeout_ms) && p.backend.timeout_ms > 0)) fail('backend.timeout_ms must be > 0');
+  if (!['passthrough', 'ask', 'deny'].includes(p.fail_mode)) fail(`invalid fail_mode "${p.fail_mode}"`);
   const { deny, ask } = p.thresholds;
-  if (!(deny > 0 && deny <= 1) || !(ask > 0 && ask <= 1) || ask > deny) {
-    throw new Error('toolgate: thresholds must satisfy 0 < ask <= deny <= 1');
-  }
-  for (const rule of p.rules) {
-    if (!['allow', 'ask', 'deny'].includes(rule.action)) {
-      throw new Error(`toolgate: invalid rule action "${String(rule.action)}"`);
-    }
-    if (rule.match?.input_regex) new RegExp(rule.match.input_regex); // throws if invalid
-    if (rule.match?.tool) toolMatcherToRegex(rule.match.tool); // throws if invalid
+  if (!(ask >= 0 && ask <= deny && deny <= 1)) fail('thresholds must satisfy 0 <= ask <= deny <= 1');
+  if (typeof p.gated_tools !== 'string' || !p.gated_tools) fail('gated_tools must be a non-empty string');
+  toolMatcherToRegex(p.gated_tools);
+  for (const [i, rule] of p.rules.entries()) {
+    if (!rule || typeof rule.match !== 'object' || rule.match === null) fail(`rule #${i + 1} needs a match block`);
+    if (!['allow', 'ask', 'deny'].includes(rule.action)) fail(`rule #${i + 1} has invalid action "${String(rule.action)}"`);
+    if (rule.match.input_regex !== undefined) new RegExp(rule.match.input_regex);
+    if (rule.match.tool !== undefined) toolMatcherToRegex(rule.match.tool);
   }
   for (const [key, q] of Object.entries(p.questions)) {
-    if (q.type !== 'boolean' || !q.instructions) {
-      throw new Error(`toolgate: question "${key}" must be a boolean question with instructions`);
+    if (!q || q.type !== 'boolean' || typeof q.instructions !== 'string') {
+      fail(`question "${key}" must be { type: boolean, instructions: string }`);
     }
   }
 }
 
-/** Claude Code-style tool matcher: exact name, pipe/comma list, or regex. */
+/** Claude Code-style tool matcher: exact name, pipe/comma list, or regex. Always anchored to the whole name. */
 export function toolMatcherToRegex(matcher: string): RegExp {
+  if (typeof matcher !== 'string') throw new Error('toolgate: tool matcher must be a string');
   if (matcher === '*' || matcher === '') return /^.*$/;
   if (/^[\w\s|,-]+$/.test(matcher)) {
     const names = matcher
       .split(/[|,]/)
       .map((s) => s.trim())
-      .filter(Boolean)
-      .map((s) => s.replace(/[.*+?^${}()[\]\\]/g, '\\$&'));
-    return new RegExp(`^(${names.join('|')})$`);
+      .filter(Boolean);
+    return new RegExp(`^(?:${names.join('|')})$`);
   }
-  return new RegExp(matcher);
+  return new RegExp(`^(?:${matcher})$`);
 }
 
 export function expandTilde(p: string): string {
-  return p.startsWith('~/') || p === '~' ? join(homedir(), p.slice(1)) : p;
+  return p === '~' || p.startsWith('~/') ? join(homedir(), p.slice(1)) : p;
 }
 
-function asObj(v: unknown): Record<string, unknown> | undefined {
-  return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined;
-}
-
-function pick(obj: Record<string, unknown>, keys: string[]): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const k of keys) if (k in obj && obj[k] !== undefined) out[k] = obj[k];
-  return out;
+function obj(v: unknown): Record<string, unknown> {
+  return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
 }
