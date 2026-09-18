@@ -65,6 +65,7 @@ async function main(): Promise<void> {
 
   switch (cmd) {
     case 'hook':
+      if (process.stdin.isTTY) throw new Error(`hook expects PreToolUse JSON on stdin\n\n${HELP}`);
       return runHook({ policyPath: args.policy, backend: args.backend });
 
     case 'check': {

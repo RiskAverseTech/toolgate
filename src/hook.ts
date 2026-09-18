@@ -1,14 +1,28 @@
-import type { Decision, DecisionBackend, HookInput, Policy } from './types.js';
+import type { Answers, Decision, DecisionBackend, HookInput, JSONObject, Policy, Questions } from './types.js';
 import { loadPolicy } from './policy.js';
 import { decide, message } from './engine.js';
 import { writeAudit } from './audit.js';
-import { GatewayBackend } from './backends/gateway.js';
 import { MockBackend } from './backends/mock.js';
+
+/**
+ * Loads the AI SDK only when the model is actually consulted. Importing `ai`
+ * costs ~600 ms; static rules and passthroughs must not pay it on every call.
+ */
+class LazyGatewayBackend implements DecisionBackend {
+  readonly name: string;
+  constructor(private readonly model: string) {
+    this.name = `gateway:${model}`;
+  }
+  async evaluate(state: JSONObject, questions: Questions, opts?: { timeoutMs?: number }): Promise<Answers> {
+    const { GatewayBackend } = await import('./backends/gateway.js');
+    return new GatewayBackend(this.model).evaluate(state, questions, opts);
+  }
+}
 
 export function makeBackend(policy: Policy, override?: string): DecisionBackend {
   const provider = override ?? policy.backend.provider;
   if (provider === 'mock') return new MockBackend();
-  if (provider === 'gateway') return new GatewayBackend(policy.backend.model);
+  if (provider === 'gateway') return new LazyGatewayBackend(policy.backend.model);
   throw new Error(`unknown backend "${provider}" (expected gateway | mock)`);
 }
 
@@ -47,6 +61,7 @@ export async function runHook(opts: { policyPath?: string; backend?: string } = 
     const backend = makeBackend(policy, opts.backend);
     const decision = await decide(input, policy, backend);
     if (decision.source !== 'no-opinion') writeAudit(policy, input, decision, backend.name);
+    if (decision.source === 'fail-mode') process.stderr.write(`toolgate: ${decision.reason}\n`); // never silent
     out = toHookOutput(decision);
   } catch (err) {
     const why = message(err);

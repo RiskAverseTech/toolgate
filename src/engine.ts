@@ -26,6 +26,7 @@ export async function decide(input: HookInput, policy: Policy, backend: Decision
 
   const state = buildState(input, policy.include_task_context);
   const questions = prepareQuestions(policy.questions, 'current_task' in state);
+  if (Object.keys(questions).length === 0) return failMode(policy, 'no questions configured');
   const started = Date.now();
   let answers: Answers;
   try {
@@ -37,7 +38,6 @@ export async function decide(input: HookInput, policy: Policy, backend: Decision
 
   const probabilities: Record<string, number> = {};
   let worst = { key: 'none', p: -1 };
-  if (Object.keys(questions).length === 0) return failMode(policy, 'no questions configured');
   for (const key of Object.keys(questions)) {
     const p = answers?.[key]?.probability;
     if (typeof p !== 'number' || !(p >= 0 && p <= 1)) return failMode(policy, `malformed answer for "${key}"`);

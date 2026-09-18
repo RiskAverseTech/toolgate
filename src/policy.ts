@@ -40,11 +40,12 @@ export const DEFAULT_QUESTIONS: Questions = {
 };
 
 /**
- * Built-in static rules. Matched against the tool input's VALUES with quotes and
+ * Built-in static rules. Matched against the tool input's text with quotes and
  * backslashes stripped (see state.ts matchText), so patterns are written for the
- * raw command, not JSON. All patterns avoid nested quantifiers (no ReDoS).
+ * raw command, not JSON. Every quantifier is bounded or unambiguous, and the rm
+ * scan stays on one line, so matching is linear even on multi-megabyte inputs.
  */
-const CMD_START = '(?:^|[;&|(\\n]\\s*)'; // rm at a command position, not inside echo/grep/git -m text
+const CMD_START = '(?:^|[;&|(\\n]\\s*)'; // a command position, not inside echo/grep/git -m text
 const WRAPPERS = '(?:(?:sudo|env|command|exec|xargs|nohup|busybox|-\\S+)\\s+)*';
 const SAFETY_FILES = '(?:\\.claude/settings|\\.toolgate\\b|toolgate\\.ya?ml)';
 
@@ -52,7 +53,7 @@ export const DEFAULT_RULES: StaticRule[] = [
   {
     match: {
       tool: 'Bash',
-      input_regex: `${CMD_START}${WRAPPERS}(?:/(?:usr/)?bin/)?rm\\s+(?:\\S+\\s+)*?(?:/|~|\\$\\{?HOME\\}?)(?:/\\*?|\\*)?(?:\\s|$)`,
+      input_regex: `${CMD_START}${WRAPPERS}(?:/(?:usr/)?bin/)?rm[ \\t]+(?:\\S+[ \\t]+){0,24}?(?:/|~|\\$\\{?HOME\\}?)(?:/\\*?|\\*)?(?:\\s|$)`,
     },
     action: 'deny',
     reason: 'Recursive delete targeting root or home',

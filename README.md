@@ -9,7 +9,7 @@
 | **privilege** — escalates or edits system/security config? | `sudo …`, writes to `~/.ssh/` |
 | **off_task** — outside the current task's scope? | touching prod during a README fix |
 
-Every closed-source harness ships a classifier like this. toolgate is that layer, opened up: policy in YAML, decisions in ~100–500 ms for fractions of a cent, every verdict logged with its probabilities.
+Every closed-source harness ships a classifier like this. toolgate is that layer, opened up: policy in YAML, decisions in ~100–500 ms for fractions of a cent, every verdict logged with its probabilities. Static rules and passthroughs cost ~60 ms and never load the AI SDK.
 
 v0.1 ships as a **Claude Code `PreToolUse` hook**. An MCP proxy (any MCP client) and OpenAI/LangChain middleware are next.
 
@@ -88,12 +88,13 @@ See [`examples/toolgate.yaml`](examples/toolgate.yaml) for every knob.
 ## Library use
 
 ```ts
-import { decide, loadPolicy, GatewayBackend } from '@riskaverse/toolgate';
+import { decide, loadPolicy, makeBackend } from '@riskaverse/toolgate';
 
+const policy = loadPolicy();
 const decision = await decide(
   { tool_name: 'Bash', tool_input: { command: 'git push --force' } },
-  loadPolicy(),
-  new GatewayBackend(),
+  policy,
+  makeBackend(policy), // loads the AI SDK lazily, only when the model is consulted
 );
 // { verdict: 'deny', probabilities: { destructive: 0.91, ... }, ... }
 ```
