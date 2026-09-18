@@ -59,7 +59,7 @@ const html = `<!doctype html><html><head><meta charset="utf-8"><style>
   </div>
   <div class="cases">${cases.map(row).join('')}</div>
   <div class="foot">
-    <div>Every risky tool call gets <b>four calibrated risk questions</b> before it runs — for a fraction of a cent.</div>
+    <div>Real Jev verdicts · <b>four calibrated risk questions</b> per tool call · ~1 s · a fraction of a cent</div>
     <div><b>github.com/RiskAverseTech/toolgate</b> · MIT</div>
   </div>
 </body></html>`;
