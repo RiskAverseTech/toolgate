@@ -1,0 +1,37 @@
+# toolgate policy — https://github.com/RiskAverseTech/toolgate
+version: 1
+
+backend:
+  provider: gateway        # gateway | mock
+  model: typesafe-ai/jev
+  timeout_ms: 2500
+
+# What to do when the decision model is unreachable:
+#   passthrough = fall back to the agent's normal permission flow (default)
+#   ask         = force a confirmation prompt
+#   deny        = block until the model is back
+fail_mode: passthrough
+
+thresholds:
+  deny: 0.85   # block at/above this probability
+  ask: 0.55    # prompt at/above this probability
+
+# Which tools the model evaluates (Claude Code matcher syntax).
+gated_tools: "Bash|Write|Edit|NotebookEdit|WebFetch|mcp__.*"
+
+# Pull the current task from the transcript so 'off_task' has context.
+include_task_context: true
+
+audit:
+  enabled: true
+  path: ~/.toolgate/audit.jsonl
+  log_input: true
+
+# Static rules run before the model — first match wins, costs nothing.
+# Uncomment to customize; these defaults are built in:
+# rules:
+#   - match: { tool: Bash, input_regex: 'rm\s+-rf\s+[/~]' }
+#     action: deny
+#     reason: Recursive delete targeting root or home
+#   - match: { tool: "Read|Glob|Grep" }
+#     action: allow

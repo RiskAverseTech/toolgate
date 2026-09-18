@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx toolgate hook",
+            "timeout": 10,
+            "statusMessage": "toolgate: checking tool call"
+          }
+        ]
+      }
+    ]
+  }
+}
