@@ -45,9 +45,10 @@ const SETTINGS_SNIPPET = `{
 const EXAMPLE_POLICY = join(dirname(fileURLToPath(import.meta.url)), '..', 'examples', 'toolgate.yaml');
 
 async function main(): Promise<void> {
-  const { values: args, positionals } = parseArgs({
+  const { values, positionals } = parseArgs({
     args: process.argv.slice(2),
     allowPositionals: true,
+    strict: false, // a typo'd flag in settings.json must never take the gate offline
     options: {
       policy: { type: 'string' },
       backend: { type: 'string' },
@@ -57,6 +58,8 @@ async function main(): Promise<void> {
       help: { type: 'boolean', short: 'h' },
     },
   });
+  const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
+  const args = { policy: str(values.policy), backend: str(values.backend), tool: str(values.tool), input: str(values.input), n: str(values.n), help: values.help === true };
   const cmd = positionals[0] ?? 'hook';
   if (args.help || cmd === 'help') return console.log(HELP);
 

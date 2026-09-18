@@ -44,11 +44,15 @@ export const DEFAULT_QUESTIONS: Questions = {
  * backslashes stripped (see state.ts matchText), so patterns are written for the
  * raw command, not JSON. All patterns avoid nested quantifiers (no ReDoS).
  */
+const CMD_START = '(?:^|[;&|(\\n]\\s*)'; // rm at a command position, not inside echo/grep/git -m text
+const WRAPPERS = '(?:(?:sudo|env|command|exec|xargs|nohup|busybox|-\\S+)\\s+)*';
+const SAFETY_FILES = '(?:\\.claude/settings|\\.toolgate\\b|toolgate\\.ya?ml)';
+
 export const DEFAULT_RULES: StaticRule[] = [
   {
     match: {
       tool: 'Bash',
-      input_regex: '\\brm\\s+(?:-\\S+\\s+)*(?:/|~|\\$\\{?HOME\\}?)(?:/\\*?|\\*)?(?:\\s|$)',
+      input_regex: `${CMD_START}${WRAPPERS}(?:/(?:usr/)?bin/)?rm\\s+(?:\\S+\\s+)*?(?:/|~|\\$\\{?HOME\\}?)(?:/\\*?|\\*)?(?:\\s|$)`,
     },
     action: 'deny',
     reason: 'Recursive delete targeting root or home',
@@ -56,15 +60,20 @@ export const DEFAULT_RULES: StaticRule[] = [
   {
     match: {
       tool: 'Bash',
-      input_regex: '\\b(?:curl|wget)\\b[^|]*\\|\\s*(?:sudo\\s+)?(?:/usr/bin/|/bin/)?(?:ba|z|da)?sh\\b|\\b(?:ba)?sh\\s+<\\(\\s*(?:curl|wget)\\b',
+      input_regex: `\\b(?:curl|wget)\\b[\\s\\S]{0,300}?\\|\\s*${WRAPPERS}(?:/(?:usr/)?bin/)?(?:(?:ba|z|da|k|fi|c)?sh\\b|\\$SHELL\\b)|\\b(?:ba|z|k)?sh\\s+<\\(\\s*(?:curl|wget)\\b`,
     },
     action: 'ask',
     reason: 'Piping a remote script into a shell',
   },
   {
+    match: { tool: 'Write|Edit|MultiEdit|NotebookEdit', input_regex: SAFETY_FILES },
+    action: 'ask',
+    reason: 'Modifies agent safety settings or the toolgate policy',
+  },
+  {
     match: {
-      tool: 'Bash|Write|Edit|MultiEdit|NotebookEdit',
-      input_regex: '\\.claude/settings|\\.toolgate\\b|toolgate\\.ya?ml',
+      tool: 'Bash',
+      input_regex: `(?:>>?|\\b(?:tee|cp|mv|rm|ln|chmod|chown|truncate)\\b|\\bsed\\s+-i)[^\\n]*${SAFETY_FILES}`,
     },
     action: 'ask',
     reason: 'Modifies agent safety settings or the toolgate policy',

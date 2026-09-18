@@ -37,9 +37,10 @@ export async function decide(input: HookInput, policy: Policy, backend: Decision
 
   const probabilities: Record<string, number> = {};
   let worst = { key: 'none', p: -1 };
+  if (Object.keys(questions).length === 0) return failMode(policy, 'no questions configured');
   for (const key of Object.keys(questions)) {
     const p = answers?.[key]?.probability;
-    if (typeof p !== 'number' || !Number.isFinite(p)) return failMode(policy, `malformed answer for "${key}"`);
+    if (typeof p !== 'number' || !(p >= 0 && p <= 1)) return failMode(policy, `malformed answer for "${key}"`);
     probabilities[key] = Math.round(p * 1000) / 1000;
     if (p > worst.p) worst = { key, p };
   }
@@ -69,8 +70,9 @@ function failMode(policy: Policy, why: string): Decision {
   return { verdict: policy.fail_mode, reason: `${why}; fail_mode=${policy.fail_mode}`, source: 'fail-mode' };
 }
 
-function message(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+/** First line, bounded — this text lands in the user's terminal and the model's context. */
+export function message(err: unknown): string {
+  return (err instanceof Error ? err.message : String(err)).split('\n')[0]!.slice(0, 200);
 }
 
 function pct(p: number): string {

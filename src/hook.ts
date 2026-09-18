@@ -1,6 +1,6 @@
 import type { Decision, DecisionBackend, HookInput, Policy } from './types.js';
 import { loadPolicy } from './policy.js';
-import { decide } from './engine.js';
+import { decide, message } from './engine.js';
 import { writeAudit } from './audit.js';
 import { GatewayBackend } from './backends/gateway.js';
 import { MockBackend } from './backends/mock.js';
@@ -49,7 +49,7 @@ export async function runHook(opts: { policyPath?: string; backend?: string } = 
     if (decision.source !== 'no-opinion') writeAudit(policy, input, decision, backend.name);
     out = toHookOutput(decision);
   } catch (err) {
-    const why = err instanceof Error ? err.message : String(err);
+    const why = message(err);
     process.stderr.write(`toolgate: ${why}\n`);
     out = toHookOutput({ verdict: 'ask', reason: `internal error (${why}) — confirm manually`, source: 'fail-mode' });
   }

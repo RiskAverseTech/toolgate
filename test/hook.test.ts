@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { toHookOutput } from '../src/hook.js';
 import { buildState } from '../src/state.js';
+import { redact } from '../src/audit.js';
 
 const CLI = join(__dirname, '..', 'dist', 'cli.js');
 
@@ -48,7 +49,27 @@ describe('state is JSON-clean for the real SDK', () => {
   });
 });
 
+describe('audit redaction', () => {
+  it('scrubs env secrets, auth headers, password flags, and known token prefixes', () => {
+    const out = redact(
+      'export AWS_SECRET_ACCESS_KEY=AKIAsecret123 && curl -H Authorization: Bearer abc.def https://x && psql --password hunter2 && echo ghp_ABCDEFGHIJKLMNOPQRST',
+    );
+    for (const leak of ['AKIAsecret123', 'abc.def', 'hunter2', 'ghp_ABCDEFGHIJKLMNOPQRST']) expect(out).not.toContain(leak);
+    expect(out).toContain('AWS_SECRET_ACCESS_KEY=[redacted]');
+  });
+});
+
 describe('hook end-to-end (built CLI)', () => {
+  it('tolerates an unknown flag instead of taking the gate offline', () => {
+    const policy = join(mkdtempSync(join(tmpdir(), 'tg-e2e-')), 'toolgate.yaml');
+    writeFileSync(policy, 'backend:\n  provider: mock\naudit:\n  enabled: false\n');
+    const stdout = execFileSync('node', [CLI, 'hook', '--policy', policy, '--verbose'], {
+      input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'rm -rf ~/' } }),
+      encoding: 'utf8',
+    });
+    expect(JSON.parse(stdout).hookSpecificOutput.permissionDecision).toBe('deny');
+  });
+
   it('denies rm -rf ~/ via stdin → stdout, exit 0', () => {
     const { stdout } = runHook(JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'rm -rf ~/' }, cwd: '/tmp' }));
     expect(JSON.parse(stdout).hookSpecificOutput.permissionDecision).toBe('deny');

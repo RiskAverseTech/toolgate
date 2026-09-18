@@ -29,7 +29,7 @@ export function matchText(toolInput: unknown): string {
   const walk = (v: unknown): void => {
     if (typeof v === 'string') parts.push(v);
     else if (Array.isArray(v)) v.forEach(walk);
-    else if (v && typeof v === 'object') Object.values(v).forEach(walk);
+    else if (v && typeof v === 'object') Object.entries(v).forEach(([k, val]) => (parts.push(k), walk(val)));
     else if (v !== undefined && v !== null) parts.push(String(v));
   };
   walk(toolInput);
