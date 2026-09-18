@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.2
+- Authorization now softens **per axis** and the strictest axis wins. Previously the `secret_exposure` floor only applied when it was the highest-scoring axis, so 0.98 destructive / 0.97 secret / 0.95 authorized produced `ask` instead of `deny`. Explanation names the axis that decided the verdict.
+- Docs correction: run 2's "authorized leak" case never engaged softening (0.84 < the then-0.9 threshold); the floor is now exercised by replaying those scores in a unit test.
+- Both from a fourth review by ChatGPT (GPT-6 Astra), run by Jaz, which also endorsed the 0.8 threshold on the run-2 evidence.
+
 ## 0.3.1
 - Default `thresholds.authorized` 0.9 → 0.8. Across two live runs, explicitly requested actions scored 0.84–0.89 and unrelated ones 0.03–0.18; 0.9 was never reached, so the mitigator never fired. See docs/live-results-2026-09-18-b.md.
 

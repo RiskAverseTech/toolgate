@@ -42,17 +42,16 @@ export async function decide(input: HookInput, policy: Policy, backend: Decision
   }
 
   const probabilities: Record<string, number> = {};
-  let worst = { key: 'none', p: -1 };
   for (const key of Object.keys(questions)) {
     const p = answers?.[key]?.probability;
     if (typeof p !== 'number' || !(p >= 0 && p <= 1)) return failMode(policy, `malformed answer for "${key}"`);
     probabilities[key] = Math.round(p * 1000) / 1000;
-    if (key !== 'authorized' && p > worst.p) worst = { key, p };
   }
 
-  // Capability is not harm. If the task explicitly calls for this action, soften one step:
-  // deny -> ask, ask -> allow. Requires task context, a real (unrounded) answer at/above
-  // the threshold, and no substantial off_task signal — conflicting judgments stay at ask.
+  // Capability is not harm. If the task explicitly calls for this action, each risk axis
+  // softens one step (deny -> ask, ask -> allow) — except UNSOFTENABLE axes — and the
+  // strictest axis wins. Softening requires task context, a real (unrounded) answer
+  // at/above the threshold, and no substantial off_task signal.
   const { deny, ask, authorized } = policy.thresholds;
   const authorizedP = answers.authorized?.probability;
   const offTaskP = answers.off_task?.probability;
@@ -61,24 +60,32 @@ export async function decide(input: HookInput, policy: Policy, backend: Decision
     typeof authorizedP === 'number' &&
     authorizedP >= authorized &&
     (offTaskP === undefined || offTaskP < ask);
+
+  const levelOf = (p: number): 0 | 1 | 2 => (p >= deny ? 2 : p >= ask ? 1 : 0);
+  let worst = { key: 'none', p: 0, level: 0 as 0 | 1 | 2, softened: false };
+  for (const key of Object.keys(questions)) {
+    if (key === 'authorized') continue;
+    const p = answers[key]!.probability;
+    const softened = isAuthorized && !UNSOFTENABLE.has(key) && levelOf(p) > 0;
+    const level = (softened ? levelOf(p) - 1 : levelOf(p)) as 0 | 1 | 2;
+    if (level > worst.level || (level === worst.level && p > worst.p)) worst = { key, p, level, softened };
+  }
+
+  const VERDICTS = ['allow', 'ask', 'deny'] as const;
+  let verdict: (typeof VERDICTS)[number] = VERDICTS[worst.level];
   const label = worst.key.replace(/_/g, ' ');
-  const base = { source: 'model' as const, probabilities, latencyMs, setupMs };
-  let verdict: 'allow' | 'ask' | 'deny' = worst.p >= deny ? 'deny' : worst.p >= ask ? 'ask' : 'allow';
   let reason =
     verdict === 'deny'
       ? `${label} risk ${pct(worst.p)} ≥ deny threshold ${pct(deny)}`
       : verdict === 'ask'
         ? `${label} risk ${pct(worst.p)} — confirm before running`
         : `all risks below ${pct(ask)} (max: ${label} ${pct(worst.p)})`;
-  if (isAuthorized && verdict !== 'allow' && !UNSOFTENABLE.has(worst.key)) {
-    verdict = verdict === 'deny' ? 'ask' : 'allow';
-    reason += `; task authorizes it (${pct(authorizedP!)})`;
-  }
+  if (worst.softened) reason += `; task authorizes it (${pct(authorizedP!)})`;
   if (verdict === 'allow' && isTruncated(state)) {
     verdict = 'ask';
     reason = `input too large to evaluate in full — confirm manually (${reason})`;
   }
-  return { verdict, reason, ...base };
+  return { verdict, reason, source: 'model', probabilities, latencyMs, setupMs };
 }
 
 /** Skip context-dependent questions when there is no task to judge against; flag state as untrusted data. */

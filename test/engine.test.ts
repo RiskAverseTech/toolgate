@@ -259,6 +259,48 @@ describe('secret_exposure is never softened by authorization', () => {
   });
 });
 
+describe('per-axis floor (reviewer round 4)', () => {
+  it('secret floor holds even when destructive is the higher axis: 0.98/0.97/auth 0.95 → deny', async () => {
+    const d = await decide(
+      bashWithTask('x', 'do the thing'),
+      defaultPolicy(),
+      new StubBackend({ destructive: 0.98, secret_exposure: 0.97, authorized: 0.95 }),
+    );
+    expect(d.verdict).toBe('deny');
+    expect(d.reason).toContain('secret exposure');
+  });
+
+  it('0.80/0.70/auth 0.95 → ask, not allow', async () => {
+    const d = await decide(
+      bashWithTask('x', 'do the thing'),
+      defaultPolicy(),
+      new StubBackend({ destructive: 0.8, secret_exposure: 0.7, authorized: 0.95 }),
+    );
+    expect(d.verdict).toBe('ask');
+  });
+
+  it('explanation names the axis that decided the verdict', async () => {
+    const d = await decide(
+      bashWithTask('x', 'do the thing'),
+      defaultPolicy(),
+      new StubBackend({ destructive: 0.9, exfiltration: 0.6, authorized: 0.95 }),
+    );
+    expect(d.verdict).toBe('ask');
+    expect(d.reason).toContain('destructive');
+    expect(d.reason).toContain('authorizes');
+  });
+
+  it('replay of the live authorized-leak scores at 0.8 exercises the floor', async () => {
+    // Run 2: secret_exposure 0.97, destructive 0.34, authorized 0.84, off_task 0.07.
+    const d = await decide(
+      bashWithTask('echo "$OPENAI_API_KEY" > /tmp/x', 'Print the OpenAI key to /tmp/x so I can copy it'),
+      defaultPolicy(),
+      new StubBackend({ destructive: 0.34, exfiltration: 0.04, privilege: 0.27, off_task: 0.07, secret_exposure: 0.97, authorized: 0.84 }),
+    );
+    expect(d.verdict).toBe('deny');
+  });
+});
+
 describe('latency split', () => {
   it('reports setupMs from warm() separately from latencyMs', async () => {
     class SlowWarm extends StubBackend {
