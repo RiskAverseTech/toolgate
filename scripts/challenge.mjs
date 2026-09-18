@@ -28,7 +28,7 @@ for (const c of set.cases) {
     d = { verdict: 'error', reason: String(err.stderr || err.message).split('\n')[0] };
   }
   const p = d.probabilities ?? {};
-  const risks = Object.entries(p).filter(([k]) => k !== 'authorized' && k !== 'off_task');
+  const risks = Object.entries(p).filter(([k]) => k !== 'authorized');
   const worst = risks.sort((a, b) => b[1] - a[1])[0];
   rows.push({ ...c, observed: d.verdict, worst, off_task: p.off_task, authorized: p.authorized, req: d.latencyMs, reason: d.reason, probs: p });
   process.stdout.write(`${String(c.id).padStart(2)}  expected ${c.expected.padEnd(5)} observed ${String(d.verdict).padEnd(11)} ${worst ? `${worst[0]}=${worst[1].toFixed(2)}` : ''} auth=${p.authorized?.toFixed(2) ?? '-'} off=${p.off_task?.toFixed(2) ?? '-'}\n`);
@@ -43,10 +43,15 @@ const dangerousAllow = dangerous.filter((r) => r.observed === 'allow');
 const friction = scored.filter((r) => rank[r.observed] > rank[r.expected]); // stricter than desired
 
 const fmt = (v) => (typeof v === 'number' ? v.toFixed(2) : '—');
+const byCat = {};
+for (const r of rows) (byCat[r.category ?? 'uncategorized'] ??= []).push(r);
+const catLines = Object.entries(byCat)
+  .map(([c, rs]) => `- **${c}** (${set.categories?.[c] ?? ''}): ${rs.filter((r) => r.observed === r.expected).length}/${rs.length}`)
+  .join('\n');
 const table = rows
   .map(
     (r) =>
-      `| ${r.id} | ${r.expected} | ${r.observed === r.expected ? '**' + r.observed + '**' : r.observed} | ${r.worst ? `${r.worst[0]} ${fmt(r.worst[1])}` : '—'} | ${fmt(r.off_task)} | ${fmt(r.authorized)} | ${r.req ?? '—'} | \`${r.command.replace(/\|/g, '\\|')}\` |`,
+      `| ${r.id} | ${r.category ?? ''} | ${r.expected} | ${r.observed === r.expected ? '**' + r.observed + '**' : r.observed} | ${r.worst ? `${r.worst[0]} ${fmt(r.worst[1])}` : '—'} | ${fmt(r.off_task)} | ${fmt(r.authorized)} | ${r.req ?? '—'} | \`${r.command.replace(/\|/g, '\\|')}\` |`,
   )
   .join('\n');
 
@@ -56,8 +61,11 @@ Frozen ${set.frozen}. Set authored by ${set.author}. Labels are desired product 
 
 **${match}/${rows.length} match.** More permissive than desired: ${dangerous.length} (of which dangerous \`allow\`: ${dangerousAllow.length}). Stricter than desired: ${friction.length}. Unscored (timeout/passthrough/error): ${unscored.length}.
 
-| # | expected | observed | worst risk | off_task | authorized | req ms | command |
-|---|---|---|---|---:|---:|---:|---|
+By category:
+${catLines}
+
+| # | cat | expected | observed | worst risk | off_task | authorized | req ms | command |
+|---|---|---|---|---|---:|---:|---:|---|
 ${table}
 
 ## Mismatches

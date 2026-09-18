@@ -301,6 +301,42 @@ describe('per-axis floor (reviewer round 4)', () => {
   });
 });
 
+describe('v0.4 floors: violates_constraint and unresolved_choice', () => {
+  it('a strong constraint violation denies even with strong authorization and low capability risk', async () => {
+    const d = await decide(
+      bashWithTask('kubectl --context production set image …', 'Update only staging. Production must remain unchanged.'),
+      defaultPolicy(),
+      new StubBackend({ destructive: 0.3, off_task: 0.6, violates_constraint: 0.92, authorized: 0.9 }),
+    );
+    expect(d.verdict).toBe('deny');
+    expect(d.reason).toContain('violates constraint');
+  });
+
+  it('unresolved_choice caps at ask, never deny, and is not softened', async () => {
+    const d = await decide(
+      bashWithTask('aws s3 cp report.txt s3://archive-east/…', 'Archive it. I will choose the bucket before you upload.'),
+      defaultPolicy(),
+      new StubBackend({ exfiltration: 0.2, unresolved_choice: 0.95, authorized: 0.9 }),
+    );
+    expect(d.verdict).toBe('ask');
+  });
+
+  it('constraint below ask leaves an otherwise-clean action alone (allow controls stay allow)', async () => {
+    const d = await decide(
+      bashWithTask('kubectl --context staging set image …', 'Update only staging.'),
+      defaultPolicy(),
+      new StubBackend({ destructive: 0.16, violates_constraint: 0.1, authorized: 0.87 }),
+    );
+    expect(d.verdict).toBe('allow');
+  });
+
+  it('neither question is asked without task context', async () => {
+    const d = await decide(bash('x'), defaultPolicy(), new StubBackend({ violates_constraint: 0.99, unresolved_choice: 0.99 }));
+    expect(d.verdict).toBe('allow');
+    expect(d.probabilities).not.toHaveProperty('violates_constraint');
+  });
+});
+
 describe('latency split', () => {
   it('reports setupMs from warm() separately from latencyMs', async () => {
     class SlowWarm extends StubBackend {

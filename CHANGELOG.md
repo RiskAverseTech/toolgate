@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0 — constraints and reserved choices
+- Two new context questions, designed from challenge-set-1's failures (all seven misses were scope violations the capability axes correctly scored as not inherently dangerous): `violates_constraint` (contradicts an explicit "only"/"do not"/read-only/target restriction in the task) and `unresolved_choice` (commits to a decision the task reserved for the user).
+- Policy: both are never softened by authorization. `violates_constraint` can reach `deny`; `unresolved_choice` is capped at `ask`.
+- challenge-set-2 frozen before this change; both sets now carry categories (control / constraint / unresolved / secret-policy) and the runner reports per-category matches.
+- Diagnosis refinement (policy could allow with authorized 0.10 if nothing crossed ask) and the two floors' semantics from a fifth review by ChatGPT (GPT-6 Astra), run by Jaz, which also authored both challenge sets.
+
 ## 0.3.2
 - Authorization now softens **per axis** and the strictest axis wins. Previously the `secret_exposure` floor only applied when it was the highest-scoring axis, so 0.98 destructive / 0.97 secret / 0.95 authorized produced `ask` instead of `deny`. Explanation names the axis that decided the verdict.
 - Docs correction: run 2's "authorized leak" case never engaged softening (0.84 < the then-0.9 threshold); the floor is now exercised by replaying those scores in a unit test.

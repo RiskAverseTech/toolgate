@@ -1,5 +1,5 @@
 import type { Answers, Decision, DecisionBackend, HookInput, Policy, Questions } from './types.js';
-import { CONTEXT_QUESTIONS, UNSOFTENABLE, toolMatcherToRegex } from './policy.js';
+import { ASK_CEILING, CONTEXT_QUESTIONS, UNSOFTENABLE, toolMatcherToRegex } from './policy.js';
 import { buildState, isTruncated, matchText } from './state.js';
 
 const UNTRUSTED_NOTE =
@@ -67,7 +67,8 @@ export async function decide(input: HookInput, policy: Policy, backend: Decision
     if (key === 'authorized') continue;
     const p = answers[key]!.probability;
     const softened = isAuthorized && !UNSOFTENABLE.has(key) && levelOf(p) > 0;
-    const level = (softened ? levelOf(p) - 1 : levelOf(p)) as 0 | 1 | 2;
+    let level = (softened ? levelOf(p) - 1 : levelOf(p)) as 0 | 1 | 2;
+    if (ASK_CEILING.has(key) && level > 1) level = 1;
     if (level > worst.level || (level === worst.level && p > worst.p)) worst = { key, p, level, softened };
   }
 
