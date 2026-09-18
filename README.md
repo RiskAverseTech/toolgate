@@ -14,7 +14,7 @@
 
 …plus one **mitigator**: `authorized` — does the stated task explicitly call for this action? Capability is not harm. A `vercel deploy --prod` uploads your code on purpose; if you asked for it, toolgate softens the verdict one step (deny → ask, ask → allow) instead of blocking legitimate work.
 
-Every closed-source harness ships a classifier like this. toolgate is that layer, opened up: policy in YAML, a real decision in about a second through the Gateway for a fraction of a cent, every verdict logged with its probabilities. Static rules and passthroughs cost ~90 ms and never load the AI SDK.
+Every closed-source harness ships a classifier like this. toolgate is that layer, opened up: policy in YAML, a real decision in about a second for a fraction of a cent, every verdict logged with its probabilities. Static rules and passthroughs cost ~90 ms and never load the AI SDK.
 
 v0.5 ships as a **Claude Code `PreToolUse` hook**. An MCP proxy (any MCP client) and OpenAI/LangChain middleware are next.
 
@@ -115,7 +115,7 @@ Backends are pluggable (`DecisionBackend`: `evaluate(state, questions) → answe
 
 ## Evaluation
 
-Sixty labeled commands across three frozen challenge sets, each authored and prospectively labeled by an independent reviewer before it was run, with the exact state sent to the model recorded per case. On unchanged v0.4 question wording: the development set 18/20; the held-out set **20/20** with complete input (an earlier 12/20 was a toolgate task-truncation bug, kept in the record); a second held-out set of ten matched pairs **17/20, 7/10 complete pairs, zero permissive errors** — the three misses are one wording defect (an "ask me before…" instruction scored as a prohibition, so `deny` instead of `ask`). Flag-carried effects (`--draft=false`, `git clean -f` vs `-n`, missing `--dry-run`), bundles distinguished only by a second-half flag, and settled-vs-reserved choices on identical commands all separate cleanly. Latency through the Gateway is 0.75–1.4 s per decision.
+Sixty labeled commands across three frozen challenge sets, each authored and prospectively labeled by an independent reviewer before it was run, with the exact state sent to the model recorded per case. On unchanged v0.4 question wording: the development set 18/20; the held-out set **20/20** with complete input (an earlier 12/20 was a toolgate task-truncation bug, kept in the record); a second held-out set of ten matched pairs **17/20, 7/10 complete pairs, zero permissive errors** — the three misses are one wording defect (an "ask me before…" instruction scored as a prohibition, so `deny` instead of `ask`). Flag-carried effects (`--draft=false`, `git clean -f` vs `-n`, missing `--dry-run`), bundles distinguished only by a second-half flag, and settled-vs-reserved choices on identical commands all separate cleanly. Latency is ~1.2 s per decision from a laptop, whether direct to TypeSafe's API (1208 ms) or through Vercel's Gateway (1324 ms) — the Gateway adds ~100 ms; the rest is the model round trip. TypeSafe quotes 70–500 ms; we have not observed that from outside their infrastructure.
 
 These are small constructed sets targeting specific failure categories, not a general failure rate. Full tables, every axis score, and the retracted analysis: [docs/challenge-analysis-2026-09-18-b.md](docs/challenge-analysis-2026-09-18-b.md), [live run 1](docs/live-results-2026-09-18.md), [live run 2](docs/live-results-2026-09-18-b.md).
 

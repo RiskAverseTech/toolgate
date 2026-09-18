@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.5.1 — usability pass before npm
+- First direct-vs-Gateway measurement, same command: direct 1208 ms (destructive 0.96), Gateway 1324 ms (destructive 0.88). Gateway overhead ~100 ms. The probability differs because the direct path folds criteria into the noul instructions.
 - Direct TypeSafe backend (`TYPESAFE_API_KEY`, `api.typesafe.ai/v1/systemone`, no SDK). Boolean questions map to `noul`; criteria are folded into the instructions since noul takes instructions only.
 - `backend.provider: auto` (new default): typesafe if `TYPESAFE_API_KEY` is set, else gateway if `AI_GATEWAY_API_KEY` is set, else a clear error naming both. `model: auto` picks each provider's default.
 - `toolgate init` now verifies itself: keys found, backend chosen, one real test decision with latency — before printing the settings snippet. `toolgate doctor` repeats the check.
