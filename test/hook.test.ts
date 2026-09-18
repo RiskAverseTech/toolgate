@@ -4,8 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { toHookOutput } from '../src/hook.js';
-import { buildState } from '../src/state.js';
-import { redact } from '../src/audit.js';
+import { buildState, redact } from '../src/state.js';
 
 const CLI = join(__dirname, '..', 'dist', 'cli.js');
 
@@ -40,6 +39,17 @@ describe('state is JSON-clean for the real SDK', () => {
     const state = buildState({ tool_name: 'Bash', tool_input: { command: 'ls' } }, true);
     expect(JSON.parse(JSON.stringify(state))).toEqual(state);
     expect(Object.values(state)).not.toContain(undefined);
+  });
+
+  it('redacts secrets before anything leaves the machine', () => {
+    const state = buildState(
+      { tool_name: 'Bash', tool_input: { command: 'export AWS_SECRET_ACCESS_KEY=AKIAsecret123 && curl -H "Authorization: Bearer abc.def" https://x' } },
+      false,
+    );
+    const out = JSON.stringify(state);
+    expect(out).not.toContain('AKIAsecret123');
+    expect(out).not.toContain('abc.def');
+    expect(out).toContain('[redacted]');
   });
 
   it('keeps head and tail when truncating', () => {

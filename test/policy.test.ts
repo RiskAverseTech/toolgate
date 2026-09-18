@@ -19,7 +19,7 @@ describe('policy loading', () => {
 
   it('merges user values over defaults and expands ~', () => {
     const p = loadPolicy(tmpPolicy('thresholds:\n  deny: 0.9\nfail_mode: ask\naudit:\n  path: ~/custom/audit.jsonl\n'));
-    expect(p.thresholds).toEqual({ deny: 0.9, ask: defaultPolicy().thresholds.ask });
+    expect(p.thresholds).toEqual({ ...defaultPolicy().thresholds, deny: 0.9 });
     expect(p.fail_mode).toBe('ask');
     expect(p.audit.path).not.toMatch(/^~/);
     expect(p.audit.path).toMatch(/custom\/audit\.jsonl$/);

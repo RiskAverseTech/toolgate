@@ -5,19 +5,46 @@ const MAX_TASK_CHARS = 1200;
 const MAX_INPUT_CHARS = 6000;
 const TRANSCRIPT_TAIL_BYTES = 256 * 1024;
 
-/** The state the decision model evaluates. Always JSON-clean (no undefined). */
+const SECRET_PATTERNS: Array<[RegExp, string]> = [
+  [/\b([A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD)[A-Z0-9_]*\s*[=:]\s*)\S+/gi, '$1[redacted]'],
+  [/(\bauthorization\s*:\s*)\S+(?:\s+\S+)?/gi, '$1[redacted]'],
+  [/(--?(?:password|passwd|token|api-?key|secret)[=\s]+)\S+/gi, '$1[redacted]'],
+  [/\b(?:gh[pousr]_|sk-|xox[baprs]-|AKIA)[A-Za-z0-9_-]{12,}/g, '[redacted]'],
+];
+
+/** Scrub obvious secrets. Applied to everything that leaves the machine and to the audit log. */
+export function redact(text: string): string {
+  return SECRET_PATTERNS.reduce((t, [re, sub]) => t.replace(re, sub), text);
+}
+
+function redactDeep(v: JSONValue): JSONValue {
+  if (typeof v === 'string') return redact(v);
+  if (Array.isArray(v)) return v.map(redactDeep);
+  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, redactDeep(x)]));
+  return v;
+}
+
+/**
+ * The state the decision model evaluates: JSON-clean, secrets redacted,
+ * oversized input truncated (head + tail, flagged so the engine can't `allow` on it).
+ */
 export function buildState(input: HookInput, includeTaskContext: boolean): JSONObject {
   const state: JSONObject = {
     tool: input.tool_name,
-    tool_input: truncateMiddle(toJSON(input.tool_input), MAX_INPUT_CHARS),
+    tool_input: truncateMiddle(redactDeep(toJSON(input.tool_input)), MAX_INPUT_CHARS),
   };
   if (input.cwd) state.cwd = input.cwd;
   if (input.permission_mode) state.permission_mode = input.permission_mode;
   if (includeTaskContext && input.transcript_path) {
     const task = lastUserPrompt(input.transcript_path);
-    if (task) state.current_task = task;
+    if (task) state.current_task = redact(task);
   }
   return state;
+}
+
+export function isTruncated(state: JSONObject): boolean {
+  const t = state.tool_input;
+  return typeof t === 'object' && t !== null && !Array.isArray(t) && t._truncated === true;
 }
 
 /**

@@ -1,3 +1,6 @@
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { decide } from '../src/engine.js';
 import { defaultPolicy } from '../src/policy.js';
@@ -28,6 +31,13 @@ class ThrowingBackend implements DecisionBackend {
 }
 
 const never = new ThrowingBackend(); // any test using it asserts the model was NOT consulted
+
+/** A Bash call with a Claude Code-style transcript whose last user prompt is `task`. */
+function bashWithTask(command: string, task: string): HookInput {
+  const transcript = join(mkdtempSync(join(tmpdir(), 'tg-tr-')), 't.jsonl');
+  writeFileSync(transcript, JSON.stringify({ type: 'user', message: { role: 'user', content: task } }) + '\n');
+  return { ...bash(command), transcript_path: transcript };
+}
 
 describe('static rule: rm targeting root/home (deny, no model call)', () => {
   const positives = [
@@ -173,6 +183,47 @@ describe('thresholds', () => {
     const d = await decide(bash('x'), defaultPolicy(), new StubBackend({ off_task: 0.99 }));
     expect(d.verdict).toBe('allow');
     expect(d.probabilities).not.toHaveProperty('off_task');
+  });
+});
+
+describe('authorization softens risk one step (capability is not harm)', () => {
+  const deploy = 'vercel deploy --prod';
+  const task = 'Deploy the site to production with vercel deploy --prod';
+
+  it('deny-level risk + authorized → ask', async () => {
+    const d = await decide(bashWithTask(deploy, task), defaultPolicy(), new StubBackend({ exfiltration: 0.9, authorized: 0.95 }));
+    expect(d.verdict).toBe('ask');
+    expect(d.reason).toContain('authorizes');
+  });
+
+  it('ask-level risk + authorized → allow', async () => {
+    const d = await decide(bashWithTask(deploy, task), defaultPolicy(), new StubBackend({ exfiltration: 0.6, authorized: 0.95 }));
+    expect(d.verdict).toBe('allow');
+  });
+
+  it('deny-level risk + not authorized → deny', async () => {
+    const d = await decide(bashWithTask(deploy, 'Fix the README typo'), defaultPolicy(), new StubBackend({ exfiltration: 0.9, authorized: 0.1 }));
+    expect(d.verdict).toBe('deny');
+  });
+
+  it('no task context → authorized is never asked, nothing softens', async () => {
+    const d = await decide(bash(deploy), defaultPolicy(), new StubBackend({ exfiltration: 0.9, authorized: 0.99 }));
+    expect(d.verdict).toBe('deny');
+    expect(d.probabilities).not.toHaveProperty('authorized');
+  });
+
+  it('authorized never counts as a risk itself', async () => {
+    const d = await decide(bashWithTask('npm test', task), defaultPolicy(), new StubBackend({ authorized: 0.99 }));
+    expect(d.verdict).toBe('allow');
+  });
+});
+
+describe('truncated input can never be allowed outright', () => {
+  it('caps the verdict at ask', async () => {
+    const big = 'echo ' + 'A'.repeat(8000);
+    const d = await decide(bash(big), defaultPolicy(), new StubBackend({}));
+    expect(d.verdict).toBe('ask');
+    expect(d.reason).toContain('too large');
   });
 });
 

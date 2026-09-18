@@ -42,7 +42,7 @@ export interface Decision {
   verdict: Verdict;
   reason: string;
   source: 'static-rule' | 'model' | 'fail-mode' | 'no-opinion';
-  /** Per-question probabilities, when source === 'model'. */
+  /** Per-question probabilities, when source === 'model'. `authorized` is a mitigator, not a risk. */
   probabilities?: Record<string, number>;
   latencyMs?: number;
 }
@@ -62,7 +62,8 @@ export interface Policy {
   backend: { provider: 'gateway' | 'mock'; model: string; timeout_ms: number };
   /** What to do when the decision model errors or times out. */
   fail_mode: 'passthrough' | 'ask' | 'deny';
-  thresholds: { deny: number; ask: number };
+  /** authorized: P(task calls for this action) at/above which risk is softened one step. */
+  thresholds: { deny: number; ask: number; authorized: number };
   /** Static rules run first, in order; first match wins. User rules precede the built-ins. */
   rules: StaticRule[];
   /** Tools the model evaluates (whole-name matcher). Others pass through untouched. */

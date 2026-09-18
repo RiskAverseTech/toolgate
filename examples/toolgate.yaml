@@ -14,8 +14,9 @@ backend:
 fail_mode: passthrough
 
 thresholds:
-  deny: 0.85               # block at/above this probability
-  ask: 0.55                # prompt at/above this probability
+  deny: 0.85               # block at/above this risk probability
+  ask: 0.55                # prompt at/above this risk probability
+  authorized: 0.5          # if P(task calls for this action) is at/above this, soften one step (deny→ask, ask→allow)
 
 # Tools the model evaluates (whole-name match; exact, a|b list, or regex).
 gated_tools: "Bash|Write|Edit|MultiEdit|NotebookEdit|WebFetch|WebSearch|mcp__.*"
@@ -38,7 +39,7 @@ rules: []
 #    reason: Infra teardown needs a human
 
 # Extra questions are merged over the four built-ins
-# (destructive, exfiltration, privilege, off_task).
+# (destructive, exfiltration, privilege, off_task, plus the `authorized` mitigator).
 questions: {}
 #  spends_money:
 #    type: boolean
