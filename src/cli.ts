@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -14,8 +15,9 @@ Usage:
   toolgate hook [--policy <path>] [--backend gateway|mock]
       Run as a Claude Code PreToolUse hook (JSON in on stdin).
 
-  toolgate check --tool <name> --input=<json|string> [--backend gateway|mock]
+  toolgate check --tool <name> --input=<json|string> [--task <text>] [--backend gateway|mock]
       Dry-run a tool call against the policy and print the decision.
+      --task supplies the "current task" so off_task/authorized are asked.
 
   toolgate init
       Write ~/.toolgate/toolgate.yaml and print the Claude Code settings snippet.
@@ -54,12 +56,21 @@ async function main(): Promise<void> {
       backend: { type: 'string' },
       tool: { type: 'string' },
       input: { type: 'string' },
+      task: { type: 'string' },
       n: { type: 'string', short: 'n', default: '20' },
       help: { type: 'boolean', short: 'h' },
     },
   });
   const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
-  const args = { policy: str(values.policy), backend: str(values.backend), tool: str(values.tool), input: str(values.input), n: str(values.n), help: values.help === true };
+  const args = {
+    policy: str(values.policy),
+    backend: str(values.backend),
+    tool: str(values.tool),
+    input: str(values.input),
+    task: str(values.task),
+    n: str(values.n),
+    help: values.help === true,
+  };
   const cmd = positionals[0] ?? 'hook';
   if (args.help || cmd === 'help') return console.log(HELP);
 
@@ -80,6 +91,12 @@ async function main(): Promise<void> {
         toolInput = args.tool === 'Bash' ? { command: raw } : raw;
       }
       const input: HookInput = { tool_name: args.tool, tool_input: toolInput, cwd: process.cwd() };
+      if (args.task) {
+        // A one-line transcript so the context questions (off_task, authorized) are asked.
+        const transcript = join(mkdtempSync(join(tmpdir(), 'toolgate-')), 'transcript.jsonl');
+        writeFileSync(transcript, JSON.stringify({ type: 'user', message: { role: 'user', content: args.task } }) + '\n');
+        input.transcript_path = transcript;
+      }
       const decision = await decide(input, policy, backend);
       return console.log(JSON.stringify({ backend: backend.name, ...decision }, null, 2));
     }
