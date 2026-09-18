@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.2 — the hook must never be silently off
+- Found on the first real install: a GUI-launched Claude Code has neither npm's global bin on PATH nor `.zshrc` exports, so the hook either was not found or ran without a key and passed everything through silently.
+- `init` now writes the settings snippet with the binary's absolute path, and saves the API key to `~/.toolgate/env` (0600). Both the CLI and the hook load that file when the variable is not already set.
+- A fail-mode passthrough (model unreachable, no key) now emits a `systemMessage` — "[toolgate] NOT gating: …" — so the user sees it in Claude Code. The decision still defers to the normal permission flow.
+
 ## 0.5.1 — usability pass before npm
 - First direct-vs-Gateway measurement, same command: direct 1208 ms (destructive 0.96), Gateway 1324 ms (destructive 0.88). Gateway overhead ~100 ms. The probability differs because the direct path folds criteria into the noul instructions.
 - Direct TypeSafe backend (`TYPESAFE_API_KEY`, `api.typesafe.ai/v1/systemone`, no SDK). Boolean questions map to `noul`; criteria are folded into the instructions since noul takes instructions only.

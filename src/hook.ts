@@ -1,5 +1,5 @@
 import type { Answers, Decision, DecisionBackend, HookInput, JSONObject, Policy, Questions } from './types.js';
-import { loadPolicy } from './policy.js';
+import { loadEnvFile, loadPolicy } from './policy.js';
 import { decide, message } from './engine.js';
 import { writeAudit } from './audit.js';
 import { MockBackend } from './backends/mock.js';
@@ -59,7 +59,11 @@ class LazyTypeSafeBackend implements DecisionBackend {
 
 /** Claude Code PreToolUse JSON. Silence (undefined) means "no opinion": the normal permission flow applies. */
 export function toHookOutput(decision: Decision): Record<string, unknown> | undefined {
-  if (decision.verdict === 'passthrough') return undefined;
+  if (decision.verdict === 'passthrough') {
+    // No opinion is silent — except when the model was unreachable: a firewall that
+    // switches itself off must say so. No permissionDecision, so the normal flow applies.
+    return decision.source === 'fail-mode' ? { systemMessage: `[toolgate] NOT gating: ${decision.reason}` } : undefined;
+  }
   const reason = `[toolgate] ${decision.reason}`;
   return {
     systemMessage: reason, // shown to the user
@@ -84,6 +88,7 @@ async function readStdin(): Promise<string> {
  */
 export async function runHook(opts: { policyPath?: string; backend?: string } = {}): Promise<void> {
   process.exitCode = 0;
+  loadEnvFile();
   let out: Record<string, unknown> | undefined;
   try {
     const input = JSON.parse(await readStdin()) as HookInput;

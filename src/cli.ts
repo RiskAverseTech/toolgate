@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { homedir } from 'node:os';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { runHook, makeBackend, resolveProvider } from './hook.js';
-import { loadPolicy, policyPath } from './policy.js';
+import { loadEnvFile, loadPolicy, policyPath } from './policy.js';
 import { decide } from './engine.js';
 import type { HookInput } from './types.js';
 
@@ -34,23 +36,47 @@ Environment (one key is enough; TYPESAFE_API_KEY wins when both are set):
   TOOLGATE_POLICY      Policy file path (default ~/.toolgate/toolgate.yaml)
 `;
 
-// Bare bin on purpose: `npx toolgate` would resolve to an UNRELATED package of that name on npm.
-const SETTINGS_SNIPPET = `{
+/**
+ * The hook command uses the absolute path of this binary: Claude Code spawns hooks
+ * with a minimal PATH (no npm global bin), and `npx toolgate` would resolve to an
+ * unrelated package of that name on npm.
+ */
+function settingsSnippet(): string {
+  let bin = 'toolgate';
+  try {
+    bin = execFileSync('sh', ['-c', 'command -v toolgate'], { encoding: 'utf8' }).trim() || bin;
+  } catch {
+    /* fall back to the bare name */
+  }
+  return `{
   "hooks": {
     "PreToolUse": [
       {
         "matcher": "*",
         "hooks": [
-          { "type": "command", "command": "toolgate hook", "timeout": 10, "statusMessage": "toolgate: checking tool call" }
+          { "type": "command", "command": "${bin} hook", "timeout": 10, "statusMessage": "toolgate: checking tool call" }
         ]
       }
     ]
   }
 }`;
+}
+
+const ENV_FILE = join(homedir(), '.toolgate', 'env');
+
+/** Persist the key so hooks work no matter how Claude Code was launched. */
+function saveKeyFile(): string | undefined {
+  const pairs = ['TYPESAFE_API_KEY', 'AI_GATEWAY_API_KEY'].filter((k) => process.env[k]).map((k) => `${k}=${process.env[k]}`);
+  if (pairs.length === 0) return undefined;
+  mkdirSync(dirname(ENV_FILE), { recursive: true, mode: 0o700 });
+  writeFileSync(ENV_FILE, pairs.join('\n') + '\n', { mode: 0o600 });
+  return ENV_FILE;
+}
 
 const EXAMPLE_POLICY = join(dirname(fileURLToPath(import.meta.url)), '..', 'examples', 'toolgate.yaml');
 
 async function main(): Promise<void> {
+  loadEnvFile();
   const { values, positionals } = parseArgs({
     args: process.argv.slice(2),
     allowPositionals: true,
@@ -117,7 +143,10 @@ async function main(): Promise<void> {
         console.log(`Wrote ${path}`);
       }
       const ok = await doctor(args.policy, args.backend);
-      console.log(`\nAdd to ~/.claude/settings.json:\n\n${SETTINGS_SNIPPET}`);
+      const saved = saveKeyFile();
+      if (saved) console.log(`✓ key saved to ${saved} (0600) so hooks work even when Claude Code is launched from the Dock`);
+      console.log(`\nAdd to ~/.claude/settings.json (merge into an existing "hooks" block if you have one):\n\n${settingsSnippet()}`);
+      console.log('\nThen quit and reopen Claude Code. Verify with: toolgate audit -n 5 after a few commands.');
       if (!ok) process.exitCode = 1;
       return;
     }

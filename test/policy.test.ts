@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_RULES, defaultPolicy, loadPolicy, toolMatcherToRegex, validatePolicy } from '../src/policy.js';
+import { DEFAULT_RULES, defaultPolicy, loadEnvFile, loadPolicy, toolMatcherToRegex, validatePolicy } from '../src/policy.js';
 
 function tmpPolicy(yaml: string): string {
   const path = join(mkdtempSync(join(tmpdir(), 'tg-')), 'toolgate.yaml');
@@ -66,6 +66,23 @@ describe('policy loading', () => {
     const p = defaultPolicy();
     p.thresholds.ask = 0;
     expect(() => validatePolicy(p)).not.toThrow();
+  });
+});
+
+describe('env file', () => {
+  it('loads keys from ~/.toolgate/env without overriding the environment', () => {
+    const f = join(mkdtempSync(join(tmpdir(), 'tg-env-')), 'env');
+    writeFileSync(f, 'TYPESAFE_API_KEY="from-file"\nexport OTHER_KEY=x\n# comment\n');
+    const prev = process.env.TYPESAFE_API_KEY;
+    process.env.TYPESAFE_API_KEY = 'from-env';
+    loadEnvFile(f);
+    expect(process.env.TYPESAFE_API_KEY).toBe('from-env');
+    expect(process.env.OTHER_KEY).toBe('x');
+    delete process.env.TYPESAFE_API_KEY;
+    loadEnvFile(f);
+    expect(process.env.TYPESAFE_API_KEY).toBe('from-file');
+    if (prev === undefined) delete process.env.TYPESAFE_API_KEY; else process.env.TYPESAFE_API_KEY = prev;
+    delete process.env.OTHER_KEY;
   });
 });
 

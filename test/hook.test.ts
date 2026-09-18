@@ -29,8 +29,14 @@ describe('hook output shape', () => {
     });
   });
 
-  it('emits nothing for passthrough', () => {
+  it('emits nothing for an ungated passthrough', () => {
     expect(toHookOutput({ verdict: 'passthrough', reason: '-', source: 'no-opinion' })).toBeUndefined();
+  });
+
+  it('a fail-mode passthrough is visible to the user but leaves the decision to the normal flow', () => {
+    const out = toHookOutput({ verdict: 'passthrough', reason: 'decision model unavailable: no key', source: 'fail-mode' });
+    expect(out).toEqual({ systemMessage: '[toolgate] NOT gating: decision model unavailable: no key' });
+    expect(out).not.toHaveProperty('hookSpecificOutput');
   });
 });
 

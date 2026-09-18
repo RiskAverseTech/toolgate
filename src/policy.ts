@@ -146,6 +146,21 @@ export function defaultPolicy(): Policy {
  * ~/.toolgate/toolgate.yaml. Deliberately no per-project discovery — a cloned
  * repo must never be able to reconfigure the firewall.
  */
+/**
+ * Load API keys from ~/.toolgate/env (KEY=value lines, mode 0600) when they are not
+ * already in the environment. Hooks spawned by a GUI-launched Claude Code never
+ * source .zshrc, so a shell export alone is not enough.
+ */
+export function loadEnvFile(path = join(homedir(), '.toolgate', 'env')): void {
+  if (!existsSync(path)) return;
+  for (const line of readFileSync(path, 'utf8').split('\n')) {
+    const m = /^\s*(?:export\s+)?([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
+    if (!m || m[1] === undefined || m[2] === undefined) continue;
+    const value = m[2].replace(/^["']|["']$/g, '');
+    if (!process.env[m[1]] && value) process.env[m[1]] = value;
+  }
+}
+
 export function policyPath(explicit?: string): string {
   return expandTilde(explicit ?? process.env.TOOLGATE_POLICY ?? join(homedir(), '.toolgate', 'toolgate.yaml'));
 }

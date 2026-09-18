@@ -28,7 +28,7 @@ export TYPESAFE_API_KEY=...     # console.typesafe.ai → API Keys   (or AI_GATE
 toolgate init                   # writes ~/.toolgate/toolgate.yaml, makes one real test decision, prints the settings snippet
 ```
 
-`init` tells you whether it works before you touch any settings — key found, backend chosen, one live verdict with its latency. `toolgate doctor` repeats that check any time.
+`init` tells you whether it works before you touch any settings — key found, backend chosen, one live verdict with its latency — then saves the key to `~/.toolgate/env` (mode 0600) so the hook works even when Claude Code is launched from the Dock, and prints a settings snippet using the binary's absolute path (Claude Code spawns hooks with a minimal PATH). `toolgate doctor` repeats the check any time. If the model is ever unreachable, the hook says so in Claude Code rather than silently standing down.
 
 Add the printed snippet to `~/.claude/settings.json`:
 
