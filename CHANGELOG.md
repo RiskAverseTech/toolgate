@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.0 — first release
+- No code changes from 0.4.1. This version marks the first evaluated state: set 2 corrected-input rerun 20/20, set 3 (10 matched pairs, held-out) 17/20 with zero permissive errors. See docs/challenge-analysis-2026-09-18-b.md.
+- Known defect carried into the release: "ask me before X" instructions score as constraint violations (deny instead of ask). Wording fix pending a fresh evaluation set.
+- First npm publish as `@riskaverse/toolgate`.
+
 ## 0.4.1 — task-context truncation (evaluation-invalidating bug)
 - `lastUserPrompt()` kept only 1,200 characters of the transcript's last user prompt. With a long task (challenge-set-2's ~1.1k fixture preamble), the actual instructions were cut off silently and the model was scored on input it never saw. Budget raised to 4,000; truncation is now flagged as `current_task_truncated` in the state and, like truncated tool input, caps the verdict at `ask`.
 - `toolgate check` now prints the exact redacted `state` sent to the model. The challenge runner records it per case and refuses to score any case whose task context was truncated or missing.
