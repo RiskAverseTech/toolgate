@@ -27,7 +27,9 @@ describe('TypeSafe direct backend', () => {
   it('surfaces HTTP errors and missing keys', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 401 })));
     await expect(new TypeSafeBackend('jev-latest', 'k').evaluate({}, { x: { type: 'boolean', instructions: 'x' } })).rejects.toThrow(/401/);
-    await expect(new TypeSafeBackend('jev-latest', undefined).evaluate({}, { x: { type: 'boolean', instructions: 'x' } })).rejects.toThrow(/TYPESAFE_API_KEY/);
+    // Empty string, not undefined: undefined would fall through to the constructor default,
+    // which reads TYPESAFE_API_KEY from the developer's own shell.
+    await expect(new TypeSafeBackend('jev-latest', '').evaluate({}, { x: { type: 'boolean', instructions: 'x' } })).rejects.toThrow(/TYPESAFE_API_KEY/);
   });
 
   it('auto resolves typesafe over gateway, and fails loudly with neither', () => {
