@@ -20,6 +20,8 @@ export type JSONObject = { [key: string]: JSONValue };
 export interface DecisionBackend {
   readonly name: string;
   evaluate(state: JSONObject, questions: Questions, opts?: { timeoutMs?: number }): Promise<Answers>;
+  /** Optional one-time setup (e.g. loading an SDK) so latencyMs measures the request alone. */
+  warm?(): Promise<void>;
 }
 
 /** Claude Code PreToolUse hook input (the fields toolgate uses). */
@@ -44,7 +46,10 @@ export interface Decision {
   source: 'static-rule' | 'model' | 'fail-mode' | 'no-opinion';
   /** Per-question probabilities, when source === 'model'. `authorized` is a mitigator, not a risk. */
   probabilities?: Record<string, number>;
+  /** Model request time only. */
   latencyMs?: number;
+  /** One-time backend setup (SDK import) paid before the request, when source === 'model'. */
+  setupMs?: number;
 }
 
 export interface StaticRule {

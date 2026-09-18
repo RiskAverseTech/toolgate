@@ -19,6 +19,7 @@ export function writeAudit(policy: Policy, input: HookInput, decision: Decision,
       reason: decision.reason,
       probabilities: decision.probabilities,
       latency_ms: decision.latencyMs,
+      setup_ms: decision.setupMs,
       backend,
     };
     const dir = dirname(policy.audit.path);

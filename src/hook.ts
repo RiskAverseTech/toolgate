@@ -10,12 +10,17 @@ import { MockBackend } from './backends/mock.js';
  */
 class LazyGatewayBackend implements DecisionBackend {
   readonly name: string;
+  private inner?: DecisionBackend;
   constructor(private readonly model: string) {
     this.name = `gateway:${model}`;
   }
-  async evaluate(state: JSONObject, questions: Questions, opts?: { timeoutMs?: number }): Promise<Answers> {
+  async warm(): Promise<void> {
     const { GatewayBackend } = await import('./backends/gateway.js');
-    return new GatewayBackend(this.model).evaluate(state, questions, opts);
+    this.inner ??= new GatewayBackend(this.model);
+  }
+  async evaluate(state: JSONObject, questions: Questions, opts?: { timeoutMs?: number }): Promise<Answers> {
+    await this.warm();
+    return this.inner!.evaluate(state, questions, opts);
   }
 }
 

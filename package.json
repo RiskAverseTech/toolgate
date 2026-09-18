@@ -1,6 +1,6 @@
 {
   "name": "@riskaverse/toolgate",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "description": "Open auto mode for AI agents: a calibrated tool-call firewall powered by decision models (TypeSafe Jev via Vercel AI Gateway). Ships as a Claude Code PreToolUse hook.",
   "keywords": [
     "jev",

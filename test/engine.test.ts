@@ -238,6 +238,40 @@ describe('authorization softens risk one step (capability is not harm)', () => {
   });
 });
 
+describe('secret_exposure is never softened by authorization', () => {
+  it('stays at ask even when the task explicitly asks for it', async () => {
+    const d = await decide(
+      bashWithTask('echo "$KEY" > /tmp/x', 'Print the key to /tmp/x'),
+      defaultPolicy(),
+      new StubBackend({ secret_exposure: 0.7, authorized: 0.97 }),
+    );
+    expect(d.verdict).toBe('ask');
+    expect(d.reason).not.toContain('authorizes');
+  });
+
+  it('stays at deny at/above the deny threshold', async () => {
+    const d = await decide(
+      bashWithTask('git add .env && git commit', 'Commit the env file'),
+      defaultPolicy(),
+      new StubBackend({ secret_exposure: 0.9, authorized: 0.97 }),
+    );
+    expect(d.verdict).toBe('deny');
+  });
+});
+
+describe('latency split', () => {
+  it('reports setupMs from warm() separately from latencyMs', async () => {
+    class SlowWarm extends StubBackend {
+      async warm(): Promise<void> {
+        await new Promise((r) => setTimeout(r, 30));
+      }
+    }
+    const d = await decide(bash('x'), defaultPolicy(), new SlowWarm({}));
+    expect(d.setupMs).toBeGreaterThanOrEqual(25);
+    expect(d.latencyMs).toBeLessThan(25);
+  });
+});
+
 describe('truncated input can never be allowed outright', () => {
   it('caps the verdict at ask', async () => {
     const big = 'echo ' + 'A'.repeat(8000);

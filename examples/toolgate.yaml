@@ -39,8 +39,8 @@ rules: []
 #    action: ask
 #    reason: Infra teardown needs a human
 
-# Extra questions are merged over the four built-ins
-# (destructive, exfiltration, privilege, off_task, plus the `authorized` mitigator).
+# Extra questions are merged over the built-ins (destructive, exfiltration,
+# privilege, secret_exposure, off_task, plus the `authorized` mitigator).
 questions: {}
 #  spends_money:
 #    type: boolean

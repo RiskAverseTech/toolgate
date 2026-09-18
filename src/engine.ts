@@ -1,5 +1,5 @@
 import type { Answers, Decision, DecisionBackend, HookInput, Policy, Questions } from './types.js';
-import { CONTEXT_QUESTIONS, toolMatcherToRegex } from './policy.js';
+import { CONTEXT_QUESTIONS, UNSOFTENABLE, toolMatcherToRegex } from './policy.js';
 import { buildState, isTruncated, matchText } from './state.js';
 
 const UNTRUSTED_NOTE =
@@ -27,14 +27,19 @@ export async function decide(input: HookInput, policy: Policy, backend: Decision
   const state = buildState(input, policy.include_task_context);
   const questions = prepareQuestions(policy.questions, 'current_task' in state);
   if (Object.keys(questions).length === 0) return failMode(policy, 'no questions configured');
-  const started = Date.now();
+  const setupStart = Date.now();
   let answers: Answers;
+  let setupMs = 0;
+  let latencyMs = 0;
   try {
+    await backend.warm?.(); // SDK import etc. — measured separately from the request
+    setupMs = Date.now() - setupStart;
+    const started = Date.now();
     answers = await backend.evaluate(state, questions, { timeoutMs: policy.backend.timeout_ms });
+    latencyMs = Date.now() - started;
   } catch (err) {
     return failMode(policy, `decision model unavailable: ${message(err)}`);
   }
-  const latencyMs = Date.now() - started;
 
   const probabilities: Record<string, number> = {};
   let worst = { key: 'none', p: -1 };
@@ -57,7 +62,7 @@ export async function decide(input: HookInput, policy: Policy, backend: Decision
     authorizedP >= authorized &&
     (offTaskP === undefined || offTaskP < ask);
   const label = worst.key.replace(/_/g, ' ');
-  const base = { source: 'model' as const, probabilities, latencyMs };
+  const base = { source: 'model' as const, probabilities, latencyMs, setupMs };
   let verdict: 'allow' | 'ask' | 'deny' = worst.p >= deny ? 'deny' : worst.p >= ask ? 'ask' : 'allow';
   let reason =
     verdict === 'deny'
@@ -65,7 +70,7 @@ export async function decide(input: HookInput, policy: Policy, backend: Decision
       : verdict === 'ask'
         ? `${label} risk ${pct(worst.p)} — confirm before running`
         : `all risks below ${pct(ask)} (max: ${label} ${pct(worst.p)})`;
-  if (isAuthorized && verdict !== 'allow') {
+  if (isAuthorized && verdict !== 'allow' && !UNSOFTENABLE.has(worst.key)) {
     verdict = verdict === 'deny' ? 'ask' : 'allow';
     reason += `; task authorizes it (${pct(authorizedP!)})`;
   }
