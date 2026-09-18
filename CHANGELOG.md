@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.1 — usability pass before npm
+- Direct TypeSafe backend (`TYPESAFE_API_KEY`, `api.typesafe.ai/v1/systemone`, no SDK). Boolean questions map to `noul`; criteria are folded into the instructions since noul takes instructions only.
+- `backend.provider: auto` (new default): typesafe if `TYPESAFE_API_KEY` is set, else gateway if `AI_GATEWAY_API_KEY` is set, else a clear error naming both. `model: auto` picks each provider's default.
+- `toolgate init` now verifies itself: keys found, backend chosen, one real test decision with latency — before printing the settings snippet. `toolgate doctor` repeats the check.
+- `toolgate audit --stats`: decision count, verdict and source breakdown, model latency p50/p90/max, tools, recent asks/denies.
+
 ## 0.5.0 — first release
 - No code changes from 0.4.1. This version marks the first evaluated state: set 2 corrected-input rerun 20/20, set 3 (10 matched pairs, held-out) 17/20 with zero permissive errors. See docs/challenge-analysis-2026-09-18-b.md.
 - Known defect carried into the release: "ask me before X" instructions score as constraint violations (deny instead of ask). Wording fix pending a fresh evaluation set.

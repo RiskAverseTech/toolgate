@@ -22,9 +22,11 @@ v0.5 ships as a **Claude Code `PreToolUse` hook**. An MCP proxy (any MCP client)
 
 ```bash
 npm install -g @riskaverse/toolgate
-export AI_GATEWAY_API_KEY=...   # Vercel AI Gateway key
-toolgate init                   # writes ~/.toolgate/toolgate.yaml + prints the settings snippet
+export TYPESAFE_API_KEY=...     # console.typesafe.ai → API Keys   (or AI_GATEWAY_API_KEY from Vercel AI Gateway)
+toolgate init                   # writes ~/.toolgate/toolgate.yaml, makes one real test decision, prints the settings snippet
 ```
+
+`init` tells you whether it works before you touch any settings — key found, backend chosen, one live verdict with its latency. `toolgate doctor` repeats that check any time.
 
 Add the printed snippet to `~/.claude/settings.json`:
 
@@ -64,14 +66,15 @@ The `mock` backend is a deterministic heuristic for tests and offline dev. `gate
 
 ## What leaves your machine
 
-Only the model path sends anything out, and only to your Vercel AI Gateway: the tool name, the tool input (secrets redacted, truncated past 6 000 chars), the cwd, and the last user prompt from the transcript (redacted, ≤1 200 chars) when `include_task_context` is on. Static rules and passthroughs send nothing. Redaction catches the obvious shapes — `KEY=`, `Authorization:`, `--password`, known token prefixes — not every secret, so treat it as a courtesy, not a guarantee; Vercel's gateway offers a zero-data-retention option if you need one.
+Only the model path sends anything out, and only to TypeSafe's API or your Vercel AI Gateway (whichever key you set): the tool name, the tool input (secrets redacted, truncated past 6 000 chars), the cwd, and the last user prompt from the transcript (redacted, ≤1 200 chars) when `include_task_context` is on. Static rules and passthroughs send nothing. Redaction catches the obvious shapes — `KEY=`, `Authorization:`, `--password`, known token prefixes — not every secret, so treat it as a courtesy, not a guarantee; Vercel's gateway offers a zero-data-retention option if you need one.
 
 ## Audit log
 
 Every decision appends a JSONL line to `~/.toolgate/audit.jsonl` (owner-only permissions, secrets redacted) — verdict, source (static rule vs model), per-question probabilities, latency:
 
 ```bash
-toolgate audit -n 20
+toolgate audit -n 20        # recent decisions
+toolgate audit --stats      # ask/deny rate, latency percentiles, which tools, recent asks
 ```
 
 ## Policy
@@ -79,7 +82,7 @@ toolgate audit -n 20
 One trusted location: `~/.toolgate/toolgate.yaml` (or `$TOOLGATE_POLICY`). toolgate deliberately never reads policy from the project directory, so a cloned repo can't reconfigure your firewall. Rules you add run *before* the built-ins; questions you add are merged with the built-ins.
 
 ```yaml
-backend: { provider: gateway, model: typesafe-ai/jev, timeout_ms: 5000 }
+backend: { provider: auto, model: auto, timeout_ms: 5000 }   # or typesafe | gateway
 fail_mode: passthrough
 thresholds: { deny: 0.85, ask: 0.55 }
 rules:

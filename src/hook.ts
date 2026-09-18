@@ -24,11 +24,37 @@ class LazyGatewayBackend implements DecisionBackend {
   }
 }
 
+/** Which real backend `auto` resolves to, from the environment. */
+export function resolveProvider(provider: string): 'typesafe' | 'gateway' | 'mock' {
+  if (provider !== 'auto') return provider as 'typesafe' | 'gateway' | 'mock';
+  if (process.env.TYPESAFE_API_KEY) return 'typesafe';
+  if (process.env.AI_GATEWAY_API_KEY) return 'gateway';
+  throw new Error('no API key found: set TYPESAFE_API_KEY (console.typesafe.ai) or AI_GATEWAY_API_KEY (vercel.com/<team>/~/ai)');
+}
+
 export function makeBackend(policy: Policy, override?: string): DecisionBackend {
-  const provider = override ?? policy.backend.provider;
+  const provider = resolveProvider(override ?? policy.backend.provider);
+  const model = policy.backend.model === 'auto' ? undefined : policy.backend.model;
   if (provider === 'mock') return new MockBackend();
-  if (provider === 'gateway') return new LazyGatewayBackend(policy.backend.model);
-  throw new Error(`unknown backend "${provider}" (expected gateway | mock)`);
+  if (provider === 'gateway') return new LazyGatewayBackend(model ?? 'typesafe-ai/jev');
+  if (provider === 'typesafe') return new LazyTypeSafeBackend(model ?? 'jev-latest');
+  throw new Error(`unknown backend "${provider}" (expected auto | typesafe | gateway | mock)`);
+}
+
+class LazyTypeSafeBackend implements DecisionBackend {
+  readonly name: string;
+  private inner?: DecisionBackend;
+  constructor(private readonly model: string) {
+    this.name = `typesafe:${model}`;
+  }
+  async warm(): Promise<void> {
+    const { TypeSafeBackend } = await import('./backends/typesafe.js');
+    this.inner ??= new TypeSafeBackend(this.model);
+  }
+  async evaluate(state: JSONObject, questions: Questions, opts?: { timeoutMs?: number }): Promise<Answers> {
+    await this.warm();
+    return this.inner!.evaluate(state, questions, opts);
+  }
 }
 
 /** Claude Code PreToolUse JSON. Silence (undefined) means "no opinion": the normal permission flow applies. */

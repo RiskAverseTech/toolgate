@@ -13,7 +13,7 @@ function tmpPolicy(yaml: string): string {
 describe('policy loading', () => {
   it('returns defaults when the file does not exist', () => {
     const p = loadPolicy('/nonexistent/toolgate.yaml');
-    expect(p.backend.model).toBe('typesafe-ai/jev');
+    expect(p.backend.provider).toBe('auto');
     expect(p.fail_mode).toBe('passthrough');
   });
 

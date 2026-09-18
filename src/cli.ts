@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { runHook, makeBackend } from './hook.js';
+import { runHook, makeBackend, resolveProvider } from './hook.js';
 import { loadPolicy, policyPath } from './policy.js';
 import { decide } from './engine.js';
 import type { HookInput } from './types.js';
@@ -20,13 +20,17 @@ Usage:
       --task supplies the "current task" so off_task/authorized are asked.
 
   toolgate init
-      Write ~/.toolgate/toolgate.yaml and print the Claude Code settings snippet.
+      Write ~/.toolgate/toolgate.yaml, make one real test decision, print the settings snippet.
 
-  toolgate audit [-n <count>]
-      Show recent audit log entries.
+  toolgate doctor
+      Check keys, backend, policy, and make one real test decision.
 
-Environment:
-  AI_GATEWAY_API_KEY   Vercel AI Gateway key (gateway backend)
+  toolgate audit [-n <count>] [--stats]
+      Show recent audit log entries, or summary statistics (ask/deny rate, latency).
+
+Environment (one key is enough; TYPESAFE_API_KEY wins when both are set):
+  TYPESAFE_API_KEY     TypeSafe direct API key (console.typesafe.ai → API Keys)
+  AI_GATEWAY_API_KEY   Vercel AI Gateway key (vercel.com/<team>/~/ai)
   TOOLGATE_POLICY      Policy file path (default ~/.toolgate/toolgate.yaml)
 `;
 
@@ -58,6 +62,7 @@ async function main(): Promise<void> {
       input: { type: 'string' },
       task: { type: 'string' },
       n: { type: 'string', short: 'n', default: '20' },
+      stats: { type: 'boolean' },
       help: { type: 'boolean', short: 'h' },
     },
   });
@@ -69,6 +74,7 @@ async function main(): Promise<void> {
     input: str(values.input),
     task: str(values.task),
     n: str(values.n),
+    stats: values.stats === true,
     help: values.help === true,
   };
   const cmd = positionals[0] ?? 'hook';
@@ -110,14 +116,24 @@ async function main(): Promise<void> {
         copyFileSync(EXAMPLE_POLICY, path);
         console.log(`Wrote ${path}`);
       }
-      return console.log(`\nAdd to ~/.claude/settings.json:\n\n${SETTINGS_SNIPPET}`);
+      const ok = await doctor(args.policy, args.backend);
+      console.log(`\nAdd to ~/.claude/settings.json:\n\n${SETTINGS_SNIPPET}`);
+      if (!ok) process.exitCode = 1;
+      return;
+    }
+
+    case 'doctor': {
+      if (!(await doctor(args.policy, args.backend))) process.exitCode = 1;
+      return;
     }
 
     case 'audit': {
       const policy = loadPolicy(args.policy);
       if (!existsSync(policy.audit.path)) return console.log(`No audit log at ${policy.audit.path}`);
+      const all = readFileSync(policy.audit.path, 'utf8').trimEnd().split('\n');
+      if (args.stats) return printStats(all);
       const n = Math.max(1, Number(args.n) || 20);
-      const lines = readFileSync(policy.audit.path, 'utf8').trimEnd().split('\n').slice(-n);
+      const lines = all.slice(-n);
       for (const line of lines) {
         try {
           const e = JSON.parse(line);
@@ -136,6 +152,67 @@ async function main(): Promise<void> {
 
     default:
       throw new Error(`Unknown command "${cmd}"\n\n${HELP}`);
+  }
+}
+
+/** Keys → backend → policy → one real decision. Prints what a new user needs to know; returns ok. */
+async function doctor(policyPath?: string, backendOverride?: string): Promise<boolean> {
+  const line = (ok: boolean, msg: string): void => console.log(`${ok ? '✓' : '✗'} ${msg}`);
+  let policy;
+  try {
+    policy = loadPolicy(policyPath);
+    line(true, `policy: ${existsSync(policyPath ?? '') || existsSync(policy.audit.path.replace(/audit\.jsonl$/, 'toolgate.yaml')) ? 'loaded' : 'built-in defaults'} (deny ${policy.thresholds.deny}, ask ${policy.thresholds.ask}, authorized ${policy.thresholds.authorized})`);
+  } catch (err) {
+    line(false, `policy: ${err instanceof Error ? err.message : err}`);
+    return false;
+  }
+  const hasTs = Boolean(process.env.TYPESAFE_API_KEY);
+  const hasGw = Boolean(process.env.AI_GATEWAY_API_KEY);
+  line(hasTs || hasGw || backendOverride === 'mock', `keys: TYPESAFE_API_KEY ${hasTs ? 'set' : 'not set'}, AI_GATEWAY_API_KEY ${hasGw ? 'set' : 'not set'}`);
+  let backend;
+  try {
+    backend = makeBackend(policy, backendOverride);
+    line(true, `backend: ${backend.name} (provider ${resolveProvider(backendOverride ?? policy.backend.provider)})`);
+  } catch (err) {
+    line(false, `backend: ${err instanceof Error ? err.message : err}`);
+    console.log('  get a key at console.typesafe.ai (API Keys) or vercel.com/<team>/~/ai, export it, and run `toolgate doctor` again');
+    return false;
+  }
+  const probe: HookInput = { tool_name: 'Bash', tool_input: { command: 'git push --force origin main' }, cwd: process.cwd() };
+  const d = await decide(probe, { ...policy, audit: { ...policy.audit, enabled: false } }, backend);
+  if (d.source !== 'model') {
+    line(false, `test decision: ${d.reason}`);
+    return false;
+  }
+  const top = Object.entries(d.probabilities ?? {}).sort((a, b) => b[1] - a[1])[0];
+  line(true, `test decision: \`git push --force origin main\` → ${d.verdict} (${top?.[0]} ${top?.[1]}) in ${d.latencyMs} ms`);
+  return true;
+}
+
+function printStats(lines: string[]): void {
+  const rows = lines.map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean) as Array<Record<string, unknown>>;
+  if (rows.length === 0) return console.log('no decisions logged yet');
+  const by = (k: string): Record<string, number> => {
+    const m: Record<string, number> = {};
+    for (const r of rows) m[String(r[k])] = (m[String(r[k])] ?? 0) + 1;
+    return m;
+  };
+  const verdicts = by('verdict');
+  const sources = by('source');
+  const lat = rows.map((r) => r.latency_ms).filter((v): v is number => typeof v === 'number').sort((a, b) => a - b);
+  const pct = (n: number): string => `${Math.round((100 * n) / rows.length)}%`;
+  const q = (p: number): number => lat[Math.min(lat.length - 1, Math.floor(p * lat.length))] ?? 0;
+  const first = rows[0]?.ts, last = rows[rows.length - 1]?.ts;
+  console.log(`${rows.length} decisions  ${first} → ${last}`);
+  console.log(`verdicts: ${Object.entries(verdicts).map(([k, v]) => `${k} ${v} (${pct(v)})`).join(', ')}`);
+  console.log(`sources:  ${Object.entries(sources).map(([k, v]) => `${k} ${v}`).join(', ')}`);
+  if (lat.length) console.log(`model latency (${lat.length} calls): p50 ${q(0.5)} ms, p90 ${q(0.9)} ms, max ${lat[lat.length - 1]} ms`);
+  const tools = by('tool');
+  console.log(`tools:    ${Object.entries(tools).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, v]) => `${k} ${v}`).join(', ')}`);
+  const asked = rows.filter((r) => r.verdict === 'ask' || r.verdict === 'deny');
+  if (asked.length) {
+    console.log(`\nrecent ask/deny:`);
+    for (const r of asked.slice(-8)) console.log(`  ${String(r.verdict).padEnd(5)} ${String(r.tool).padEnd(8)} ${String(r.input ?? '').slice(0, 70)}  — ${String(r.reason).slice(0, 60)}`);
   }
 }
 

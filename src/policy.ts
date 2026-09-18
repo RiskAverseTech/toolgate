@@ -130,7 +130,7 @@ export const DEFAULT_RULES: StaticRule[] = [
 
 export function defaultPolicy(): Policy {
   return {
-    backend: { provider: 'gateway', model: 'typesafe-ai/jev', timeout_ms: 5000 },
+    backend: { provider: 'auto', model: 'auto', timeout_ms: 5000 },
     fail_mode: 'passthrough',
     thresholds: { deny: 0.85, ask: 0.55, authorized: 0.8 },
     rules: [...DEFAULT_RULES],
@@ -181,7 +181,7 @@ export function validatePolicy(p: Policy): void {
   const fail = (msg: string): never => {
     throw new Error(`toolgate policy: ${msg}`);
   };
-  if (!['gateway', 'mock'].includes(p.backend.provider)) fail(`unknown backend.provider "${p.backend.provider}"`);
+  if (!['auto', 'typesafe', 'gateway', 'mock'].includes(p.backend.provider)) fail(`unknown backend.provider "${p.backend.provider}"`);
   if (!(Number.isFinite(p.backend.timeout_ms) && p.backend.timeout_ms > 0)) fail('backend.timeout_ms must be > 0');
   if (!['passthrough', 'ask', 'deny'].includes(p.fail_mode)) fail(`invalid fail_mode "${p.fail_mode}"`);
   const { deny, ask, authorized } = p.thresholds;
