@@ -11,7 +11,7 @@
 
 …plus one **mitigator**: `authorized` — does the stated task explicitly call for this action? Capability is not harm. A `vercel deploy --prod` uploads your code on purpose; if you asked for it, toolgate softens the verdict one step (deny → ask, ask → allow) instead of blocking legitimate work.
 
-Every closed-source harness ships a classifier like this. toolgate is that layer, opened up: policy in YAML, decisions in ~100–500 ms for fractions of a cent, every verdict logged with its probabilities. Static rules and passthroughs cost ~60 ms and never load the AI SDK.
+Every closed-source harness ships a classifier like this. toolgate is that layer, opened up: policy in YAML, a real decision in about a second through the Gateway for a fraction of a cent, every verdict logged with its probabilities. Static rules and passthroughs cost ~90 ms and never load the AI SDK.
 
 v0.1 ships as a **Claude Code `PreToolUse` hook**. An MCP proxy (any MCP client) and OpenAI/LangChain middleware are next.
 
@@ -76,7 +76,7 @@ toolgate audit -n 20
 One trusted location: `~/.toolgate/toolgate.yaml` (or `$TOOLGATE_POLICY`). toolgate deliberately never reads policy from the project directory, so a cloned repo can't reconfigure your firewall. Rules you add run *before* the built-ins; questions you add are merged with the built-in four.
 
 ```yaml
-backend: { provider: gateway, model: typesafe-ai/jev, timeout_ms: 2500 }
+backend: { provider: gateway, model: typesafe-ai/jev, timeout_ms: 5000 }
 fail_mode: passthrough
 thresholds: { deny: 0.85, ask: 0.55 }
 rules:
@@ -107,6 +107,10 @@ const decision = await decide(
 
 Backends are pluggable (`DecisionBackend`: `evaluate(state, questions) → answers`). Direct TypeSafe API and local-model backends welcome as PRs.
 
+## First live numbers
+
+From the first real run (v0.2.2, Vercel AI Gateway, no task context): `ls -la` and `git status` scored 0.01–0.02 on every risk; `git push origin main` scored destructive 0.16 / exfiltration 0.19 → allow; `git push --force origin main` scored destructive 0.88 → deny. Latency was 0.85–1.0 s per call through the Gateway (TypeSafe quotes 70–500 ms direct), and the very first call exceeded the old 2.5 s budget, so the default is now 5 s. The Gateway free tier rate-limits this model after a few calls; a small credit top-up removes the limit. A fuller evaluation on labeled commands is the next milestone.
+
 ## Known limits
 
 - The transcript Claude Code exposes to hooks can lag the live conversation by a turn, so `off_task` may occasionally judge against the previous prompt.
@@ -118,5 +122,9 @@ Backends are pluggable (`DecisionBackend`: `evaluate(state, questions) → answe
 - [ ] Direct TypeSafe API backend (`api.typesafe.ai/v1/systemone`)
 - [ ] Local backend (openjev-style logit reading) for air-gapped use
 - [ ] Published evaluation on labeled tool calls: dangerous actions allowed, legitimate actions blocked, confirmation rate, end-to-end latency
+
+## Credits
+
+Built by Jaz (Risk Averse Technology Company) with Claude (Fable 5.1, in Cowork). Hardened through three independent adversarial audits run as Claude subagents, and two rounds of product and correctness review by ChatGPT (GPT-6 Astra) — the "capability is not harm" critique behind v0.2.0 and the authorization edge cases in v0.2.1 are theirs. Every finding is recorded in [CHANGELOG.md](CHANGELOG.md).
 
 MIT © Risk Averse Technology Company LLC

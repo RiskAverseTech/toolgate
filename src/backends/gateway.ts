@@ -14,7 +14,7 @@ export class GatewayBackend implements DecisionBackend {
   }
 
   async evaluate(state: JSONObject, questions: Questions, opts?: { timeoutMs?: number }): Promise<Answers> {
-    const timeoutMs = opts?.timeoutMs ?? 2500;
+    const timeoutMs = opts?.timeoutMs ?? 5000;
     const controller = new AbortController();
     let timer: NodeJS.Timeout | undefined;
     const deadline = new Promise<never>((_, reject) => {

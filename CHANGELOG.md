@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.3
+- First live Jev results (via Vercel AI Gateway): benign commands 0.01–0.02, `git push origin main` 0.16–0.19, `git push --force` 0.88 → deny. Observed latency ~0.85–1.0 s per call through the Gateway; first call timed out at 2.5 s. Default `timeout_ms` raised 2500 → 5000.
+- README: latency claim corrected to what we measured; credits section.
+
 ## 0.2.2
 - `toolgate check --task <text>` supplies task context so `off_task` and `authorized` are exercised.
 - `scripts/live-check.sh`: one-line-per-command live smoke test against real Jev.
@@ -8,14 +12,14 @@
 - Softening now requires task context, a real (unrounded) `authorized` answer at/above the threshold, and `off_task` below the ask threshold — conflicting judgments stay at `ask`.
 - Missing authorization no longer passes a threshold of 0 (and no longer prints `NaN`).
 - Default `thresholds.authorized` raised 0.5 → 0.9 until tuned on labeled data.
-- Edge cases, fix, and threshold recommendation contributed by REVIEWER_CREDIT.
+- Edge cases (missing-context × zero threshold, rounding before comparison, off_task/authorized conflict), the replacement check, and the 0.9 threshold recommendation came from an independent review by ChatGPT (GPT-6 Astra), run by Jaz.
 
 ## 0.2.0 — capability is not harm
 - New `authorized` mitigator question; deny → ask and ask → allow when the stated task explicitly calls for the action. Nothing softens without task context.
 - `exfiltration` no longer counts pushes to the project's own remote or deploys with its own tooling.
 - Truncated input can never be allowed outright.
 - Secrets redacted from state before it leaves the machine, not only in the audit log.
-- The risk-vs-authorization critique that drove this release came from REVIEWER_CREDIT.
+- The risk-vs-authorization critique that drove this release ("a 95% probability that something uploads data is not a 95% probability that it is harmful") came from an independent review by ChatGPT (GPT-6 Astra), run by Jaz.
 
 ## 0.1.2
 - Lazy-load the AI SDK: static-rule and passthrough paths ~600 ms → ~90 ms.

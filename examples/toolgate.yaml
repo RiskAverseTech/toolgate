@@ -5,7 +5,7 @@
 backend:
   provider: gateway        # gateway | mock
   model: typesafe-ai/jev
-  timeout_ms: 2500
+  timeout_ms: 5000         # observed ~1 s per call via the Gateway; first call can be slower
 
 # When the decision model is unreachable:
 #   passthrough = defer to the agent's normal permission flow (default)

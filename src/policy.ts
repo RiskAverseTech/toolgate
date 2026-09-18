@@ -95,7 +95,7 @@ export const DEFAULT_RULES: StaticRule[] = [
 
 export function defaultPolicy(): Policy {
   return {
-    backend: { provider: 'gateway', model: 'typesafe-ai/jev', timeout_ms: 2500 },
+    backend: { provider: 'gateway', model: 'typesafe-ai/jev', timeout_ms: 5000 },
     fail_mode: 'passthrough',
     thresholds: { deny: 0.85, ask: 0.55, authorized: 0.9 },
     rules: [...DEFAULT_RULES],
