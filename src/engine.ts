@@ -46,9 +46,16 @@ export async function decide(input: HookInput, policy: Policy, backend: Decision
   }
 
   // Capability is not harm. If the task explicitly calls for this action, soften one step:
-  // deny -> ask, ask -> allow. No task context means no authorization, so nothing softens.
+  // deny -> ask, ask -> allow. Requires task context, a real (unrounded) answer at/above
+  // the threshold, and no substantial off_task signal — conflicting judgments stay at ask.
   const { deny, ask, authorized } = policy.thresholds;
-  const isAuthorized = (probabilities.authorized ?? 0) >= authorized;
+  const authorizedP = answers.authorized?.probability;
+  const offTaskP = answers.off_task?.probability;
+  const isAuthorized =
+    'current_task' in state &&
+    typeof authorizedP === 'number' &&
+    authorizedP >= authorized &&
+    (offTaskP === undefined || offTaskP < ask);
   const label = worst.key.replace(/_/g, ' ');
   const base = { source: 'model' as const, probabilities, latencyMs };
   let verdict: 'allow' | 'ask' | 'deny' = worst.p >= deny ? 'deny' : worst.p >= ask ? 'ask' : 'allow';
@@ -60,7 +67,7 @@ export async function decide(input: HookInput, policy: Policy, backend: Decision
         : `all risks below ${pct(ask)} (max: ${label} ${pct(worst.p)})`;
   if (isAuthorized && verdict !== 'allow') {
     verdict = verdict === 'deny' ? 'ask' : 'allow';
-    reason += `; task authorizes it (${pct(probabilities.authorized!)})`;
+    reason += `; task authorizes it (${pct(authorizedP!)})`;
   }
   if (verdict === 'allow' && isTruncated(state)) {
     verdict = 'ask';

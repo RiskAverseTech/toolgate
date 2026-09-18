@@ -97,7 +97,7 @@ export function defaultPolicy(): Policy {
   return {
     backend: { provider: 'gateway', model: 'typesafe-ai/jev', timeout_ms: 2500 },
     fail_mode: 'passthrough',
-    thresholds: { deny: 0.85, ask: 0.55, authorized: 0.5 },
+    thresholds: { deny: 0.85, ask: 0.55, authorized: 0.9 },
     rules: [...DEFAULT_RULES],
     gated_tools: 'Bash|Write|Edit|MultiEdit|NotebookEdit|WebFetch|WebSearch|mcp__.*',
     include_task_context: true,

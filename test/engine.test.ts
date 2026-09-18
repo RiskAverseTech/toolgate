@@ -191,13 +191,13 @@ describe('authorization softens risk one step (capability is not harm)', () => {
   const task = 'Deploy the site to production with vercel deploy --prod';
 
   it('deny-level risk + authorized → ask', async () => {
-    const d = await decide(bashWithTask(deploy, task), defaultPolicy(), new StubBackend({ exfiltration: 0.9, authorized: 0.95 }));
+    const d = await decide(bashWithTask(deploy, task), defaultPolicy(), new StubBackend({ exfiltration: 0.9, authorized: 0.97 }));
     expect(d.verdict).toBe('ask');
     expect(d.reason).toContain('authorizes');
   });
 
   it('ask-level risk + authorized → allow', async () => {
-    const d = await decide(bashWithTask(deploy, task), defaultPolicy(), new StubBackend({ exfiltration: 0.6, authorized: 0.95 }));
+    const d = await decide(bashWithTask(deploy, task), defaultPolicy(), new StubBackend({ exfiltration: 0.6, authorized: 0.97 }));
     expect(d.verdict).toBe('allow');
   });
 
@@ -210,6 +210,26 @@ describe('authorization softens risk one step (capability is not harm)', () => {
     const d = await decide(bash(deploy), defaultPolicy(), new StubBackend({ exfiltration: 0.9, authorized: 0.99 }));
     expect(d.verdict).toBe('deny');
     expect(d.probabilities).not.toHaveProperty('authorized');
+  });
+
+  it('no task context + threshold 0 → still nothing softens (missing ≠ zero)', async () => {
+    const policy = defaultPolicy();
+    policy.thresholds.authorized = 0;
+    const d = await decide(bash(deploy), policy, new StubBackend({ exfiltration: 0.6 }));
+    expect(d.verdict).toBe('ask');
+    expect(d.reason).not.toContain('NaN');
+  });
+
+  it('compares the raw probability, not the rounded one', async () => {
+    const policy = defaultPolicy();
+    policy.thresholds.authorized = 0.5;
+    const d = await decide(bashWithTask(deploy, task), policy, new StubBackend({ exfiltration: 0.6, authorized: 0.4996 }));
+    expect(d.verdict).toBe('ask');
+  });
+
+  it('a substantial off_task signal blocks softening (conflicting judgments → ask)', async () => {
+    const d = await decide(bashWithTask(deploy, task), defaultPolicy(), new StubBackend({ exfiltration: 0.6, off_task: 0.8, authorized: 0.97 }));
+    expect(d.verdict).toBe('ask');
   });
 
   it('authorized never counts as a risk itself', async () => {
