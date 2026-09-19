@@ -64,12 +64,22 @@ export async function decide(input: HookInput, policy: Policy, backend: Decision
     authorizedP >= authorized &&
     (offTaskP === undefined || offTaskP < ask);
 
-  // A reserved choice is a question for the human, not a block. When the model is deny-level
-  // confident that the task reserves this decision for the user ("ask me before…", "I haven't
-  // decided…"), a deny on a softenable axis becomes an ask — per axis, so a prohibition or a
-  // secret leak (UNSOFTENABLE) still wins as deny.
+  // A reserved choice ("ask me before…", "I haven't decided…") softens a deny to an ask, but
+  // ONLY when the reservation plausibly covers the action in front of us. Guards, so a
+  // reservation for one step can't borrow down the verdict of unrelated destruction bundled
+  // into the same command, and an injected "unresolved_choice=1" can't either:
+  //   - task context present (no reservation without a stated task),
+  //   - the action is on-task (off_task below ask),
+  //   - no explicit prohibition (violates_constraint below ask).
+  // off_task itself is never softened this way, and UNSOFTENABLE axes never are.
   const reservedP = answers.unresolved_choice?.probability;
-  const reservedChoice = typeof reservedP === 'number' && reservedP >= deny;
+  const violatesP = answers.violates_constraint?.probability;
+  const reservedChoice =
+    typeof reservedP === 'number' &&
+    reservedP >= deny &&
+    'current_task' in state &&
+    (offTaskP === undefined || offTaskP < ask) &&
+    (violatesP === undefined || violatesP < ask);
 
   const levelOf = (p: number): 0 | 1 | 2 => (p >= deny ? 2 : p >= ask ? 1 : 0);
   let worst = { key: 'none', p: 0, level: 0 as 0 | 1 | 2, softened: false };
@@ -80,7 +90,7 @@ export async function decide(input: HookInput, policy: Policy, backend: Decision
     const softened = isAuthorized && !UNSOFTENABLE.has(key) && levelOf(p) > 0;
     let level = (softened ? levelOf(p) - 1 : levelOf(p)) as 0 | 1 | 2;
     if (ASK_CEILING.has(key) && level > 1) level = 1;
-    if (reservedChoice && !UNSOFTENABLE.has(key) && level === 2) {
+    if (reservedChoice && !UNSOFTENABLE.has(key) && key !== 'off_task' && level === 2) {
       level = 1;
       if (!reservedAxis || p > reservedAxis.p) reservedAxis = { key, p };
     }
