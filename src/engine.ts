@@ -64,14 +64,26 @@ export async function decide(input: HookInput, policy: Policy, backend: Decision
     authorizedP >= authorized &&
     (offTaskP === undefined || offTaskP < ask);
 
+  // A reserved choice is a question for the human, not a block. When the model is deny-level
+  // confident that the task reserves this decision for the user ("ask me before…", "I haven't
+  // decided…"), a deny on a softenable axis becomes an ask — per axis, so a prohibition or a
+  // secret leak (UNSOFTENABLE) still wins as deny.
+  const reservedP = answers.unresolved_choice?.probability;
+  const reservedChoice = typeof reservedP === 'number' && reservedP >= deny;
+
   const levelOf = (p: number): 0 | 1 | 2 => (p >= deny ? 2 : p >= ask ? 1 : 0);
   let worst = { key: 'none', p: 0, level: 0 as 0 | 1 | 2, softened: false };
+  let reservedAxis: { key: string; p: number } | undefined; // a deny the reserved choice turned into an ask
   for (const key of Object.keys(questions)) {
     if (key === 'authorized') continue;
     const p = answers[key]!.probability;
     const softened = isAuthorized && !UNSOFTENABLE.has(key) && levelOf(p) > 0;
     let level = (softened ? levelOf(p) - 1 : levelOf(p)) as 0 | 1 | 2;
     if (ASK_CEILING.has(key) && level > 1) level = 1;
+    if (reservedChoice && !UNSOFTENABLE.has(key) && level === 2) {
+      level = 1;
+      if (!reservedAxis || p > reservedAxis.p) reservedAxis = { key, p };
+    }
     if (level > worst.level || (level === worst.level && p > worst.p)) worst = { key, p, level, softened };
   }
 
@@ -85,6 +97,9 @@ export async function decide(input: HookInput, policy: Policy, backend: Decision
         ? `${label} risk ${pct(worst.p)} — confirm before running`
         : `all risks below ${pct(ask)} (max: ${label} ${pct(worst.p)})`;
   if (worst.softened) reason += `; task authorizes it (${pct(authorizedP!)})`;
+  if (reservedAxis && verdict === 'ask') {
+    reason += `; ${reservedAxis.key.replace(/_/g, ' ')} ${pct(reservedAxis.p)} would deny, but the task reserves this choice for you (${pct(reservedP!)})`;
+  }
   if (verdict === 'allow' && isTruncated(state)) {
     verdict = 'ask';
     reason = `input too large to evaluate in full — confirm manually (${reason})`;
