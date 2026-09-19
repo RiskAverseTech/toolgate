@@ -1,6 +1,6 @@
 # toolgate
 
-[![npm](https://img.shields.io/npm/v/@riskaverse/toolgate?label=npm)](https://www.npmjs.com/package/@riskaverse/toolgate) [![release](https://img.shields.io/github/v/release/RiskAverseTech/toolgate?include_prereleases&label=release)](https://github.com/RiskAverseTech/toolgate/releases) [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![npm](https://img.shields.io/npm/v/@riskaverse/toolgate?label=npm)](https://www.npmjs.com/package/@riskaverse/toolgate) [![release](https://img.shields.io/github/v/release/RiskAverseTech/toolgate?include_prereleases&label=release)](https://github.com/RiskAverseTech/toolgate/releases) [![CI](https://github.com/RiskAverseTech/toolgate/actions/workflows/ci.yml/badge.svg)](https://github.com/RiskAverseTech/toolgate/actions/workflows/ci.yml) [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 **Open auto mode for AI agents.** A calibrated tool-call firewall: before your coding agent runs a risky action, toolgate asks a decision model — [TypeSafe's Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev), through its API directly or via [Vercel AI Gateway](https://vercel.com/changelog/typesafe-ai-jev-now-available-on-ai-gateway) — seven questions and acts on the probabilities:
 
@@ -131,6 +131,10 @@ These are small constructed sets targeting specific failure categories, not a ge
 - [ ] A read-only fast path (`ls`, `cat`, `git status` … with no pipes or redirects) so the model is only consulted when something could change
 - [ ] MCP proxy mode — gate any MCP client, not just Claude Code
 - [ ] Local backend (openjev-style logit reading) for air-gapped use
+
+## Security
+
+toolgate is defense in depth, not a sandbox. To report a vulnerability, see [SECURITY.md](SECURITY.md) — privately, please, not a public issue. Tests run in CI on Node 20 and 22 on every push and pull request.
 
 ## Credits
 
