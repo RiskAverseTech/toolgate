@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { runHook, makeBackend, resolveProvider } from './hook.js';
+import { runMcp } from './mcp.js';
 import { loadEnvFile, loadPolicy, policyPath } from './policy.js';
 import { decide } from './engine.js';
 import { SETTINGS_PATH, hookCommand, hookSelfTest, installHook, installedHookCommands, readSettings, settingsSnippet, writeSettings } from './install.js';
@@ -20,6 +21,11 @@ Usage:
       Dry-run a tool call against the policy and print the decision and the exact state sent.
       --task supplies user prompts (repeatable, oldest first; the last is the current task)
       so the context questions are asked.
+
+  toolgate mcp [--gate <regex>] [--on-ask block|allow] [--backend ...] -- <server-cmd> [args...]
+      Sit between an MCP client and one downstream MCP server, gating every tools/call.
+      Allow forwards it; deny (and ask, by default) returns a tool error with the reason.
+      Supply a task with TOOLGATE_TASK or ~/.toolgate/task so the context questions apply.
 
   toolgate init [--print]
       Write ~/.toolgate/toolgate.yaml, save the API key for hooks, make one real test decision,
@@ -56,8 +62,12 @@ const EXAMPLE_POLICY = join(dirname(fileURLToPath(import.meta.url)), '..', 'exam
 
 async function main(): Promise<void> {
   loadEnvFile();
+  const rawArgs = process.argv.slice(2);
+  const ddIndex = rawArgs.indexOf('--');
+  const optionArgs = ddIndex >= 0 ? rawArgs.slice(0, ddIndex) : rawArgs;
+  const afterDoubleDash = ddIndex >= 0 ? rawArgs.slice(ddIndex + 1) : [];
   const { values, positionals } = parseArgs({
-    args: process.argv.slice(2),
+    args: optionArgs,
     allowPositionals: true,
     strict: false, // a typo'd flag in settings.json must never take the gate offline
     options: {
@@ -69,6 +79,8 @@ async function main(): Promise<void> {
       n: { type: 'string', short: 'n', default: '20' },
       stats: { type: 'boolean' },
       print: { type: 'boolean' },
+      gate: { type: 'string' },
+      'on-ask': { type: 'string' },
       help: { type: 'boolean', short: 'h' },
     },
   });
@@ -82,6 +94,8 @@ async function main(): Promise<void> {
     n: str(values.n),
     stats: values.stats === true,
     print: values.print === true,
+    gate: str(values.gate),
+    onAsk: str(values['on-ask']),
     help: values.help === true,
   };
   const cmd = positionals[0] ?? 'hook';
@@ -112,6 +126,11 @@ async function main(): Promise<void> {
       }
       const decision = await decide(input, policy, backend);
       return console.log(JSON.stringify({ backend: backend.name, ...decision }, null, 2)); // includes `state`: what Jev saw
+    }
+
+    case 'mcp': {
+      if (args.onAsk !== undefined && args.onAsk !== 'block' && args.onAsk !== 'allow') throw new Error('--on-ask must be block or allow');
+      return runMcp({ policyPath: args.policy, backend: args.backend, gate: args.gate, onAsk: args.onAsk as 'block' | 'allow' | undefined }, afterDoubleDash);
     }
 
     case 'init': {

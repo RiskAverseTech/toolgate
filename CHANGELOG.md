@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.0 — gate any MCP client
+- New `toolgate mcp -- <server-cmd>`: an MCP stdio proxy. toolgate launches the downstream server, forwards the JSON-RPC transport untouched, and gates every `tools/call` through the same engine as the Claude Code hook. Allow forwards; deny (and ask, by default) returns a normal tool result marked `isError` with the reason, so the agent relays it instead of the client crashing on a protocol error. Works with Cursor, Claude Desktop, Cline, or any MCP client.
+- `--on-ask block|allow` (default block, since MCP calls are unattended) and `--gate <regex>` (default: all tool names). The `--` separates toolgate's flags from the downstream command, whose own flags are passed through verbatim.
+- Task context for MCP: `TOOLGATE_TASK` env var or `~/.toolgate/task` file. MCP carries tool calls but not the conversation, so without a task the four context questions are skipped and the `authorized` mitigator can't fire — the gate is stricter, never more permissive. A supplied task restores softening.
+- Never fails open: an internal error in the proxy blocks the call with a visible reason rather than forwarding it.
+- The engine, policy, backends, redaction and audit are unchanged and shared — the proxy is a new transport in front of the same decisioning.
+- Docs: known-limits now names the literal-string false positive (a single-quoted sample read as if executable) and the MCP no-context behavior.
+
 ## 0.6.4 — tune the reserved-choice guard on the data
 - Reran sets 2, 3 and 5 on 0.6.3 (real Jev). Set 2 20/20; set 5 22/24 (the two misses are stricter-than-desired: a single-quoted literal read as a substitution, and threshold jitter at 0.85); set 3 **19/20 — a regression**: case 19, a legitimate "delete scratch.txt after asking me" reserved choice, went ask→deny.
 - Cause: 0.6.3 gated reserved-choice softening on `violates_constraint < ask`, but Jev draws a middling `violates_constraint` on genuine "ask me before" phrasings, so the gate refused to soften a legitimate reservation.

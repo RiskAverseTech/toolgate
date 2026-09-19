@@ -18,7 +18,7 @@
 
 Every closed-source harness ships a classifier like this. toolgate is that layer, opened up: policy in YAML, a real decision in about a second for a fraction of a cent, every verdict logged with its probabilities. Static rules and passthroughs cost ~90 ms and never load the AI SDK.
 
-v0.5 ships as a **Claude Code `PreToolUse` hook** for macOS and Linux. An MCP proxy (any MCP client) and OpenAI/LangChain middleware are next.
+It ships two ways: a **Claude Code `PreToolUse` hook**, and an **MCP proxy** that gates any MCP client (Cursor, Claude Desktop, your own agent). OpenAI/LangChain middleware is next.
 
 ## Quickstart
 
@@ -48,6 +48,31 @@ Risky tool calls now get denied or bounced to a confirmation prompt, with the re
 **Claude Code's own classifier.** In auto mode Claude Code already runs a classifier (Sonnet 5, Anthropic's policy) over actions before they execute. toolgate is the open one beside it: a different model from a different vendor, a policy you can read and tune, calibrated probabilities instead of a category name, and a log on your machine — and it also runs in Manual and acceptEdits modes, on any model, and wherever auto mode is unavailable or disabled. The two are independent layers with different failure modes; that is the point of having both.
 
 Two honest notes. First, toolgate's `allow` is advisory: Claude Code's own deny rules and its always-confirm list still apply on top. Second, toolgate is **defense in depth, not a sandbox**. It shrinks the blast radius of mistakes and prompt injection; it does not replace containers, least-privilege credentials, or your own review. A sufficiently adversarial input can fool any classifier — which is why static rules run first and every decision is auditable.
+
+## Gate any MCP client
+
+The same engine can sit in front of any [MCP](https://modelcontextprotocol.io) server, not just Claude Code — Cursor, Claude Desktop, Cline, or your own agent. Wrap the server: toolgate launches it, proxies the stdio JSON-RPC transport, and gates every `tools/call` before it reaches the server.
+
+```jsonc
+// In your MCP client's server config, wrap the real command with `toolgate mcp -- …`:
+{
+  "mcpServers": {
+    "github": {
+      "command": "toolgate",
+      "args": ["mcp", "--", "npx", "-y", "@modelcontextprotocol/server-github"]
+    }
+  }
+}
+```
+
+Allowed calls are forwarded untouched; a denied one (and, by default, an `ask`) never reaches the server — the client gets a normal tool result marked `isError` with the reason, so the agent can relay it to you rather than the client erroring out. `--on-ask allow` forwards asks instead of blocking them; `--gate <regex>` narrows which tool names are checked (default: all).
+
+MCP carries tool calls, not the conversation, so there is usually no task context — the four context questions are skipped and the `authorized` mitigator can't fire, which makes the gate **stricter, never more permissive**. To get context back (and let a requested action soften from deny to ask), set the current task:
+
+```bash
+export TOOLGATE_TASK="Sync issues from acme/widget to the local tracker. Do not delete anything."
+# …or write it to ~/.toolgate/task; the proxy reads either.
+```
 
 ## Try it without a key
 
@@ -120,6 +145,8 @@ These are small constructed sets targeting specific failure categories, not a ge
 
 - The transcript Claude Code exposes to hooks can lag the live conversation by a turn, so `off_task` may occasionally judge against the previous prompt.
 - `fail_mode: passthrough` holds only while toolgate answers within Claude Code's hook timeout; a hook that hangs blocks the call. toolgate bounds its own model call (`timeout_ms`, one attempt) to stay well inside it.
+- Classification is on the command as written, not a shell parse: a harmless single-quoted literal that merely contains dangerous-looking text (e.g. `printf '%s' '$(cat .env)'`) can be judged as if it would execute, producing a stricter verdict than needed. A real command parser is a future improvement; the direction of the error is safe.
+- MCP proxy mode has no conversation, so it runs without task context by default (see above): stricter, and `ask` blocks unless you pass `--on-ask allow`. It gates `tools/call`; other MCP methods (resources, prompts) pass through.
 
 ## Roadmap
 
@@ -129,7 +156,7 @@ These are small constructed sets targeting specific failure categories, not a ge
 - [ ] Held-out validation of the 0.6.0 wording by the independent reviewer (set 4 is a development set)
 - [ ] `trusted_hosts`: destinations you declare legitimate, passed to the model as context — a first-ever call to your own API with a key in it currently looks like exfiltration
 - [ ] A read-only fast path (`ls`, `cat`, `git status` … with no pipes or redirects) so the model is only consulted when something could change
-- [ ] MCP proxy mode — gate any MCP client, not just Claude Code
+- [x] MCP proxy mode — gate any MCP client, not just Claude Code (0.7.0)
 - [ ] Local backend (openjev-style logit reading) for air-gapped use
 
 ## Security
