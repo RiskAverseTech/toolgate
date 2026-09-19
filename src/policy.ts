@@ -138,7 +138,7 @@ export function defaultPolicy(): Policy {
     include_task_context: true,
     show_allows: false,
     limits: { input_chars: 20000, task_chars: 6000, earlier_prompts: 2 },
-    unattended: { modes: ['bypassPermissions', 'auto', 'dontAsk'], ask: 'deny' },
+    unattended: { modes: ['bypassPermissions', 'dontAsk'], ask: 'deny' },
     audit: { enabled: true, path: join(homedir(), '.toolgate', 'audit.jsonl'), log_input: true },
     questions: { ...DEFAULT_QUESTIONS },
   };

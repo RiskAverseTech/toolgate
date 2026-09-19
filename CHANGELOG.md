@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.2 — auto mode is attended
+- Verified on the Claude Code desktop app: in `auto` mode a hook's `ask` still shows the user a permission dialog (the hook input reports `permission_mode: "auto"`; the dialog appeared). 0.6.1 treated `auto` as unattended and turned asks into denies there, which was stricter than necessary. `auto` is removed from the default `unattended.modes`; `bypassPermissions` and `dontAsk` remain.
+- README: how toolgate relates to Claude Code's built-in auto-mode classifier.
+
 ## 0.6.1 — a reserved choice is a question, not a block
 - 0.6.0 evaluation on real Jev: frozen set 2 19/20, frozen set 3 19/20 (up from 17/20), development set 4 8/12; zero permissive errors anywhere. Three of the six misses were one pattern: the task says "ask me before deleting…" or "I haven't decided…", the model scores `unresolved_choice` 0.92–0.94 and (after the 0.6.0 wording) `violates_constraint` only 0.41–0.65 — but `destructive` sits at 0.85–0.89, so the deny now came from that axis instead.
 - Policy: when `unresolved_choice` is at deny-level confidence, a deny on a softenable axis becomes an ask, per axis — `secret_exposure` and `violates_constraint` still win as deny, and nothing drops below ask. The explanation says which axis would have denied. Unit tests replay the exact probabilities of the three missed cases.

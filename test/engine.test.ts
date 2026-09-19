@@ -389,11 +389,15 @@ describe('truncated input can never be allowed outright', () => {
 
 describe('unattended permission modes', () => {
   const asking = new StubBackend({ destructive: 0.7 });
-  it('ask becomes deny in bypassPermissions / auto by default, with the mode named', async () => {
+  it('ask becomes deny in bypassPermissions / dontAsk by default, with the mode named', async () => {
     const d = await decide({ ...bash('x'), permission_mode: 'bypassPermissions' }, defaultPolicy(), asking);
     expect(d.verdict).toBe('deny');
     expect(d.reason).toContain('bypassPermissions');
-    expect((await decide({ ...bash('x'), permission_mode: 'auto' }, defaultPolicy(), asking)).verdict).toBe('deny');
+    expect((await decide({ ...bash('x'), permission_mode: 'dontAsk' }, defaultPolicy(), asking)).verdict).toBe('deny');
+  });
+
+  it('auto mode is attended (a hook ask still prompts there, verified on the desktop app): unchanged', async () => {
+    expect((await decide({ ...bash('x'), permission_mode: 'auto' }, defaultPolicy(), asking)).verdict).toBe('ask');
   });
 
   it('unchanged in default mode, with no mode, or when unattended.ask is ask', async () => {
@@ -401,12 +405,15 @@ describe('unattended permission modes', () => {
     expect((await decide(bash('x'), defaultPolicy(), asking)).verdict).toBe('ask');
     const p = defaultPolicy();
     p.unattended.ask = 'ask';
-    expect((await decide({ ...bash('x'), permission_mode: 'auto' }, p, asking)).verdict).toBe('ask');
+    expect((await decide({ ...bash('x'), permission_mode: 'bypassPermissions' }, p, asking)).verdict).toBe('ask');
   });
 
-  it('never touches allow or deny', async () => {
-    expect((await decide({ ...bash('x'), permission_mode: 'auto' }, defaultPolicy(), new StubBackend({}))).verdict).toBe('allow');
-    expect((await decide({ ...bash('x'), permission_mode: 'auto' }, defaultPolicy(), new StubBackend({ destructive: 0.95 }))).verdict).toBe('deny');
+  it('modes are configurable, and allow/deny are never touched', async () => {
+    const p = defaultPolicy();
+    p.unattended.modes = ['auto'];
+    expect((await decide({ ...bash('x'), permission_mode: 'auto' }, p, asking)).verdict).toBe('deny');
+    expect((await decide({ ...bash('x'), permission_mode: 'bypassPermissions' }, defaultPolicy(), new StubBackend({}))).verdict).toBe('allow');
+    expect((await decide({ ...bash('x'), permission_mode: 'bypassPermissions' }, defaultPolicy(), new StubBackend({ destructive: 0.95 }))).verdict).toBe('deny');
   });
 });
 

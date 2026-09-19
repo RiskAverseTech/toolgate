@@ -42,9 +42,10 @@ limits:
 
 # Claude Code permission modes in which nobody answers a prompt. An `ask` there would be
 # auto-resolved, so it becomes a `deny` (the model is told why and stops). Set ask: ask
-# to keep asks as asks everywhere.
+# to keep asks as asks everywhere. `auto` mode is not listed: a hook's ask still shows
+# a permission dialog there (verified on the desktop app).
 unattended:
-  modes: [bypassPermissions, auto, dontAsk]
+  modes: [bypassPermissions, dontAsk]
   ask: deny
 
 audit:

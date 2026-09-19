@@ -90,7 +90,8 @@ export interface Policy {
   /**
    * In these Claude Code permission modes nobody answers a prompt, so an `ask` would be
    * auto-resolved. `unattended.ask` says what an ask becomes there: `deny` (the model is told
-   * why and stops) or `ask` (unchanged).
+   * why and stops) or `ask` (unchanged). `auto` mode is NOT unattended: verified on the desktop
+   * app, a hook's ask still shows the user a permission dialog there.
    */
   unattended: { modes: string[]; ask: 'ask' | 'deny' };
   audit: { enabled: boolean; path: string; log_input: boolean };

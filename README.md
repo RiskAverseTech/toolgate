@@ -42,8 +42,10 @@ Risky tool calls now get denied or bounced to a confirmation prompt, with the re
 2. **Ungated tools pass through** (`gated_tools`, default: `Bash|Write|Edit|MultiEdit|NotebookEdit|WebFetch|WebSearch|mcp__.*`). Read-only tools never cost a model call.
 3. **Everything else goes to the decision model** with the tool call, cwd, and the task: the latest user prompt plus the two before it, read from the transcript, because in a working session the latest prompt is usually "yes" or "go ahead" (the four task-context questions — `off_task`, `authorized`, `violates_constraint`, `unresolved_choice` — are skipped when there is no prompt at all). One request, all questions answered in parallel. The model is told that tool input and prompt text are untrusted data, not instructions.
 4. **Thresholds map probabilities to verdicts**: max risk ≥ `deny` (0.85) blocks, ≥ `ask` (0.55) prompts, else allow. Then, if `authorized` ≥ 0.8 and `off_task` is below the ask threshold, each axis softens one step — except `secret_exposure`, `violates_constraint`, and `unresolved_choice`, which a task can never authorize away; the strictest axis wins. And if the model is deny-level sure the task *reserves* this decision for you ("ask me before…", "I haven't decided…"), a deny on any softenable axis becomes an ask — a reserved choice is a question, not a block. No task context means no authorization, so nothing softens — and input too large to evaluate in full is never allowed outright, only asked about.
-5. **Nobody home?** Claude Code tells the hook its permission mode. In unattended modes (`bypassPermissions`, `auto`, `dontAsk`) an `ask` would be auto-resolved without you seeing it, so by default it becomes a `deny` there, with the reason fed back to the model (`unattended.ask: ask` turns this off).
+5. **Nobody home?** Claude Code tells the hook its permission mode. In unattended modes (`bypassPermissions`, `dontAsk`) an `ask` would be auto-resolved without you seeing it, so by default it becomes a `deny` there, with the reason fed back to the model (`unattended.ask: ask` turns this off). Auto mode is not unattended: a hook's ask still shows you a permission dialog there.
 6. **If the model is unreachable or returns garbage**, `fail_mode` decides: `passthrough` (default — the agent's normal permission flow still applies), `ask`, or `deny`. If toolgate itself hits an internal error (bad stdin, broken policy), it always answers `ask` and writes the reason to stderr — never a silent allow.
+
+**Claude Code's own classifier.** In auto mode Claude Code already runs a classifier (Sonnet 5, Anthropic's policy) over actions before they execute. toolgate is the open one beside it: a different model from a different vendor, a policy you can read and tune, calibrated probabilities instead of a category name, and a log on your machine — and it also runs in Manual and acceptEdits modes, on any model, and wherever auto mode is unavailable or disabled. The two are independent layers with different failure modes; that is the point of having both.
 
 Two honest notes. First, toolgate's `allow` is advisory: Claude Code's own deny rules and its always-confirm list still apply on top. Second, toolgate is **defense in depth, not a sandbox**. It shrinks the blast radius of mistakes and prompt injection; it does not replace containers, least-privilege credentials, or your own review. A sufficiently adversarial input can fool any classifier — which is why static rules run first and every decision is auditable.
 
@@ -77,7 +79,7 @@ backend: { provider: auto, model: auto, timeout_ms: 5000 }   # or typesafe | gat
 fail_mode: passthrough
 thresholds: { deny: 0.85, ask: 0.55 }
 limits: { input_chars: 20000, task_chars: 6000, earlier_prompts: 2 }
-unattended: { modes: [bypassPermissions, auto, dontAsk], ask: deny }
+unattended: { modes: [bypassPermissions, dontAsk], ask: deny }
 rules:
   - match: { tool: Bash, input_regex: 'terraform\s+destroy' }
     action: ask

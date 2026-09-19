@@ -65,7 +65,7 @@ describe('policy loading', () => {
   it('limits and unattended merge over defaults', () => {
     const p = loadPolicy(tmpPolicy('limits:\n  input_chars: 30000\nunattended:\n  ask: ask\n'));
     expect(p.limits).toEqual({ input_chars: 30000, task_chars: 6000, earlier_prompts: 2 });
-    expect(p.unattended).toEqual({ modes: ['bypassPermissions', 'auto', 'dontAsk'], ask: 'ask' });
+    expect(p.unattended).toEqual({ modes: ['bypassPermissions', 'dontAsk'], ask: 'ask' });
   });
 
   it('show_allows defaults off and can be turned on', () => {
