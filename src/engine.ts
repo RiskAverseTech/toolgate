@@ -65,21 +65,22 @@ export async function decide(input: HookInput, policy: Policy, backend: Decision
     (offTaskP === undefined || offTaskP < ask);
 
   // A reserved choice ("ask me before…", "I haven't decided…") softens a deny to an ask, but
-  // ONLY when the reservation plausibly covers the action in front of us. Guards, so a
-  // reservation for one step can't borrow down the verdict of unrelated destruction bundled
-  // into the same command, and an injected "unresolved_choice=1" can't either:
+  // ONLY when the reservation plausibly covers the action in front of us:
   //   - task context present (no reservation without a stated task),
-  //   - the action is on-task (off_task below ask),
-  //   - no explicit prohibition (violates_constraint below ask).
-  // off_task itself is never softened this way, and UNSOFTENABLE axes never are.
+  //   - the action is on-task (off_task below ask) — this is what stops a reservation for one
+  //     step from covering unrelated destruction bundled into the same command.
+  // off_task itself is never softened this way, and UNSOFTENABLE axes (secret_exposure,
+  // violates_constraint, unresolved_choice) never are — so a genuine prohibition, which scores
+  // violates_constraint at deny level, still denies on its own and needs no separate gate here.
+  // (v0.6.3 also gated on violates_constraint < ask; that regressed legitimate reserved choices
+  // whose phrasing drew a middling violates_constraint from the model — set 3 #19 — while adding
+  // nothing, since a real prohibition is already unsoftenable. Removed in v0.6.4.)
   const reservedP = answers.unresolved_choice?.probability;
-  const violatesP = answers.violates_constraint?.probability;
   const reservedChoice =
     typeof reservedP === 'number' &&
     reservedP >= deny &&
     'current_task' in state &&
-    (offTaskP === undefined || offTaskP < ask) &&
-    (violatesP === undefined || violatesP < ask);
+    (offTaskP === undefined || offTaskP < ask);
 
   const levelOf = (p: number): 0 | 1 | 2 => (p >= deny ? 2 : p >= ask ? 1 : 0);
   let worst = { key: 'none', p: 0, level: 0 as 0 | 1 | 2, softened: false };

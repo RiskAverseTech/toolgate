@@ -570,8 +570,15 @@ describe('reserved-choice guard (0.6.3): a reservation only covers the action it
     expect((await taskCmd({ destructive: 0.93, off_task: 0.85, unresolved_choice: 0.94, authorized: 0.13 })).verdict).toBe('deny');
   });
 
-  it('does NOT soften when a prohibition is present (ask-before must not erase never-do)', async () => {
-    expect((await taskCmd({ destructive: 0.9, violates_constraint: 0.7, unresolved_choice: 0.95 })).verdict).toBe('deny');
+  it('does NOT soften when a real prohibition is present (deny-level violates_constraint is unsoftenable)', async () => {
+    expect((await taskCmd({ destructive: 0.9, off_task: 0.1, violates_constraint: 0.9, unresolved_choice: 0.95 })).verdict).toBe('deny');
+  });
+
+  it('a middling violates_constraint does NOT block a genuine reservation (set 3 #19 regression fix)', async () => {
+    // A legitimate "ask me before deleting X" often draws a middling violates_constraint from the
+    // model. That must not turn the reserved choice into a hard deny.
+    const d = await taskCmd({ destructive: 0.9, off_task: 0.29, violates_constraint: 0.7, unresolved_choice: 0.91, authorized: 0.12 });
+    expect(d.verdict).toBe('ask');
   });
 
   it('does NOT soften without task context (injected unresolved_choice on a bare command)', async () => {
