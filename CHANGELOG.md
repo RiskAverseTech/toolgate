@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.1 — fail safe by default, and prove it on the allow side
+- Default `fail_mode` is now `ask`, not `passthrough`. A firewall that allows when its checker is unreachable is in the state an attacker wants; the default now confirms gray-area calls instead (static rules still deny the known-dangerous ones, and `secret_exposure`/prohibitions are never softened). `fail_mode: passthrough` remains for anyone who prefers uptime over the guarantee. Prompted by review from Grok and ChatGPT.
+- `toolgate audit --stats` now lists the **closest allows** — allowed calls ranked by their highest risk score — so the allow side is reviewable. A firewall is only as trustworthy as what it lets through; the bar to keep publishing numbers is that this list contains nothing that should have been stopped.
+- New **Threat model** section in the README, stated plainly: it's a gate not least privilege; it can be wrong inside the schema and an iterating agent is harder to catch than one obfuscated command; the hosted model means gating exports (redacted) what it protects, which is why a local backend is the priority; it fails safe, not open.
+
 ## 0.7.0 — gate any MCP client
 - New `toolgate mcp -- <server-cmd>`: an MCP stdio proxy. toolgate launches the downstream server, forwards the JSON-RPC transport untouched, and gates every `tools/call` through the same engine as the Claude Code hook. Allow forwards; deny (and ask, by default) returns a normal tool result marked `isError` with the reason, so the agent relays it instead of the client crashing on a protocol error. Works with Cursor, Claude Desktop, Cline, or any MCP client.
 - `--on-ask block|allow` (default block, since MCP calls are unattended) and `--gate <regex>` (default: all tool names). The `--` separates toolgate's flags from the downstream command, whose own flags are passed through verbatim.

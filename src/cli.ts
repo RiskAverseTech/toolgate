@@ -294,6 +294,18 @@ function printStats(lines: string[]): void {
     console.log(`\nrecent ask/deny:`);
     for (const r of asked.slice(-8)) console.log(`  ${String(r.verdict).padEnd(5)} ${String(r.tool).padEnd(8)} ${String(r.input ?? '').slice(0, 70)}  — ${String(r.reason).slice(0, 60)}`);
   }
+  // Allow-side review: the allowed calls that came closest to a threshold. A firewall is only
+  // as trustworthy as its allows, so surface the near-misses to eyeball for anything that should
+  // not have passed. The bar to publish: this list has no call that should have been stopped.
+  const maxRisk = (r: Record<string, unknown>): number => {
+    const p = r.probabilities as Record<string, number> | undefined;
+    return p ? Math.max(0, ...Object.entries(p).filter(([k]) => k !== 'authorized').map(([, v]) => v)) : 0;
+  };
+  const allows = rows.filter((r) => r.verdict === 'allow' && r.probabilities).sort((a, b) => maxRisk(b) - maxRisk(a));
+  if (allows.length) {
+    console.log(`\nclosest allows (review — should contain nothing that ought to have been stopped):`);
+    for (const r of allows.slice(0, 8)) console.log(`  ${(maxRisk(r) * 100).toFixed(0).padStart(3)}%  ${String(r.tool).padEnd(8)} ${String(r.input ?? '').slice(0, 74)}`);
+  }
 }
 
 main().catch((err) => {

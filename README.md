@@ -43,7 +43,7 @@ Risky tool calls now get denied or bounced to a confirmation prompt, with the re
 3. **Everything else goes to the decision model** with the tool call, cwd, and the task: the latest user prompt plus the two before it, read from the transcript, because in a working session the latest prompt is usually "yes" or "go ahead" (the four task-context questions — `off_task`, `authorized`, `violates_constraint`, `unresolved_choice` — are skipped when there is no prompt at all). One request, all questions answered in parallel. The model is told that tool input and prompt text are untrusted data, not instructions.
 4. **Thresholds map probabilities to verdicts**: max risk ≥ `deny` (0.85) blocks, ≥ `ask` (0.55) prompts, else allow. Then, if `authorized` ≥ 0.8 and `off_task` is below the ask threshold, each axis softens one step — except `secret_exposure`, `violates_constraint`, and `unresolved_choice`, which a task can never authorize away; the strictest axis wins. And if the model is deny-level sure the task *reserves* this decision for you ("ask me before…", "I haven't decided…"), a deny on a softenable axis becomes an ask — a reserved choice is a question, not a block — but only when the reservation plausibly covers this action: task context present and the action on-task, so a reservation for one step can't soften unrelated destruction bundled into the same command (and `off_task` itself is never softened this way). Secret-exposure and prohibition verdicts stay unsoftenable — though note an unsoftenable axis keeps its *scored* verdict, so a prohibition the model scores only at ask level yields `ask`, not `deny`. No task context means no authorization, so nothing softens — and input too large to evaluate in full is never allowed outright, only asked about.
 5. **Nobody home?** Claude Code tells the hook its permission mode. In unattended modes (`bypassPermissions`, `dontAsk`) an `ask` would be auto-resolved without you seeing it, so by default it becomes a `deny` there, with the reason fed back to the model (`unattended.ask: ask` turns this off). Auto mode is not unattended: a hook's ask still shows you a permission dialog there.
-6. **If the model is unreachable or returns garbage**, `fail_mode` decides: `passthrough` (default — the agent's normal permission flow still applies), `ask`, or `deny`. If toolgate itself hits an internal error (bad stdin, broken policy), it always answers `ask` and writes the reason to stderr — never a silent allow.
+6. **If the model is unreachable or returns garbage**, static rules have already run, and `fail_mode` decides the rest: `ask` (default — a confirmation prompt, fail safe), `deny` (fail closed), or `passthrough` (fail open — defers to the agent's normal flow; not recommended, since "checker down → allow" is the state an attacker wants). An internal error (bad stdin, broken policy) always answers `ask` — never a silent allow.
 
 **Claude Code's own classifier.** In auto mode Claude Code already runs a classifier (Sonnet 5, Anthropic's policy) over actions before they execute. toolgate is the open one beside it: a different model from a different vendor, a policy you can read and tune, calibrated probabilities instead of a category name, and a log on your machine — and it also runs in Manual and acceptEdits modes, on any model, and wherever auto mode is unavailable or disabled. The two are independent layers with different failure modes; that is the point of having both.
 
@@ -101,7 +101,7 @@ One trusted location: `~/.toolgate/toolgate.yaml` (or `$TOOLGATE_POLICY`). toolg
 
 ```yaml
 backend: { provider: auto, model: auto, timeout_ms: 5000 }   # or typesafe | gateway
-fail_mode: passthrough
+fail_mode: ask
 thresholds: { deny: 0.85, ask: 0.55 }
 limits: { input_chars: 20000, task_chars: 6000, earlier_prompts: 2 }
 unattended: { modes: [bypassPermissions, dontAsk], ask: deny }
@@ -144,7 +144,8 @@ These are small constructed sets targeting specific failure categories, not a ge
 ## Known limits
 
 - The transcript Claude Code exposes to hooks can lag the live conversation by a turn, so `off_task` may occasionally judge against the previous prompt.
-- `fail_mode: passthrough` holds only while toolgate answers within Claude Code's hook timeout; a hook that hangs blocks the call. toolgate bounds its own model call (`timeout_ms`, one attempt) to stay well inside it.
+- The default `fail_mode` is `ask`: if the decision model is unreachable, gray-area calls are confirmed rather than allowed (static rules still deny the known-dangerous ones). Set `fail_mode: passthrough` only if you'd rather an outage not interrupt the agent — that trades the firewall's guarantee for uptime.
+- toolgate must answer within Claude Code's hook timeout; a hook that hangs blocks the call. toolgate bounds its own model call (`timeout_ms`, one attempt) to stay well inside it.
 - Classification is on the command as written, not a shell parse: a harmless single-quoted literal that merely contains dangerous-looking text (e.g. `printf '%s' '$(cat .env)'`) can be judged as if it would execute, producing a stricter verdict than needed. A real command parser is a future improvement; the direction of the error is safe.
 - MCP proxy mode has no conversation, so it runs without task context by default (see above): stricter, and `ask` blocks unless you pass `--on-ask allow`. It gates `tools/call`; other MCP methods (resources, prompts) pass through.
 
@@ -155,9 +156,18 @@ These are small constructed sets targeting specific failure categories, not a ge
 - [x] Real-usage numbers from the audit log, and the 0.6.0 fixes they demanded
 - [ ] Held-out validation of the 0.6.0 wording by the independent reviewer (set 4 is a development set)
 - [ ] `trusted_hosts`: destinations you declare legitimate, passed to the model as context — a first-ever call to your own API with a key in it currently looks like exfiltration
+- [ ] **Local backend** (openjev-style, on-device) so nothing leaves the machine — the priority, since the hosted model is itself a data path
 - [ ] A read-only fast path (`ls`, `cat`, `git status` … with no pipes or redirects) so the model is only consulted when something could change
 - [x] MCP proxy mode — gate any MCP client, not just Claude Code (0.7.0)
-- [ ] Local backend (openjev-style logit reading) for air-gapped use
+
+## Threat model
+
+toolgate is one layer, and it's honest about the others it doesn't replace:
+
+- **It's a gate, not least privilege.** It blocks actions by policy and by risk, but it doesn't manage your credentials, tokens, file permissions, or containers. Scope those down anyway; toolgate shrinks the blast radius, it doesn't remove it.
+- **It can be wrong inside the schema.** Jev can't return malformed output, but a low score is not proof an action is safe, and an agent that can iterate (write a helper, then run it) is harder to catch than a single obfuscated command. Static rules run first, everything is logged, and `secret_exposure` and explicit prohibitions are never softened away.
+- **The model is hosted by default, so gating exports what you're protecting.** The model path sends the (redacted, truncated) tool call and recent prompts to TypeSafe's API or the Vercel AI Gateway. Redaction is a courtesy, not a guarantee. If that trade-off doesn't work for you, a local backend that keeps everything on the machine is on the roadmap; until then, review what leaves (below) and your backend's retention policy.
+- **It fails safe, not open.** When the model is unreachable the default is to ask, not allow (see `fail_mode`).
 
 ## Security
 

@@ -14,7 +14,7 @@ describe('policy loading', () => {
   it('returns defaults when the file does not exist', () => {
     const p = loadPolicy('/nonexistent/toolgate.yaml');
     expect(p.backend.provider).toBe('auto');
-    expect(p.fail_mode).toBe('passthrough');
+    expect(p.fail_mode).toBe('ask');
   });
 
   it('merges user values over defaults and expands ~', () => {

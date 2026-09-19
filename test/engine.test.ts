@@ -418,8 +418,14 @@ describe('unattended permission modes', () => {
 });
 
 describe('fail modes', () => {
-  it('backend error → fail_mode (passthrough by default)', async () => {
-    expect(await decide(bash('x'), defaultPolicy(), never)).toMatchObject({ verdict: 'passthrough', source: 'fail-mode' });
+  it('backend error → fail_mode (ask by default: fail safe, never open)', async () => {
+    expect(await decide(bash('x'), defaultPolicy(), never)).toMatchObject({ verdict: 'ask', source: 'fail-mode' });
+  });
+
+  it('fail_mode: passthrough still available for those who opt into it', async () => {
+    const policy = defaultPolicy();
+    policy.fail_mode = 'passthrough';
+    expect(await decide(bash('x'), policy, never)).toMatchObject({ verdict: 'passthrough', source: 'fail-mode' });
   });
 
   it('respects fail_mode: deny', async () => {

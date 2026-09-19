@@ -131,7 +131,7 @@ export const DEFAULT_RULES: StaticRule[] = [
 export function defaultPolicy(): Policy {
   return {
     backend: { provider: 'auto', model: 'auto', timeout_ms: 5000 },
-    fail_mode: 'passthrough',
+    fail_mode: 'ask',
     thresholds: { deny: 0.85, ask: 0.55, authorized: 0.8 },
     rules: [...DEFAULT_RULES],
     gated_tools: 'Bash|Write|Edit|MultiEdit|NotebookEdit|WebFetch|WebSearch|mcp__.*',

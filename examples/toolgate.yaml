@@ -8,11 +8,11 @@ backend:
   model: auto              # auto = jev-latest (typesafe) / typesafe-ai/jev (gateway)
   timeout_ms: 5000         # observed ~1 s per call via the Gateway; first call can be slower
 
-# When the decision model is unreachable:
-#   passthrough = defer to the agent's normal permission flow (default)
-#   ask         = force a confirmation prompt
-#   deny        = block until the model is back
-fail_mode: passthrough
+# When the decision model is unreachable (static rules still run first either way):
+#   ask         = force a confirmation prompt (default — fail safe, never a silent allow)
+#   deny        = block until the model is back (fail closed)
+#   passthrough = defer to the agent's normal permission flow (fail open — not recommended)
+fail_mode: ask
 
 thresholds:
   deny: 0.85               # block at/above this risk probability
