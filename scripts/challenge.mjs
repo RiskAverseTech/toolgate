@@ -3,7 +3,10 @@
 // an expected-vs-observed report. Classification only: no command is ever executed.
 // Every first attempt is recorded, including timeouts/passthrough; nothing is retried.
 //
-// Usage: AI_GATEWAY_API_KEY=... node scripts/challenge.mjs docs/challenge-set-1.json [out.md]
+// Usage: TYPESAFE_API_KEY=... node scripts/challenge.mjs docs/challenge-set-1.json [out.md]
+//        (or AI_GATEWAY_API_KEY; TOOLGATE_BACKEND=mock for an offline dry run)
+// A case may carry `prompts: [...]` (oldest first) instead of `task`: the last prompt is the
+// current task and the earlier ones become earlier_prompts, as in a real session.
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
@@ -13,21 +16,24 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const [, , setPath, outArg] = process.argv;
 if (!setPath) throw new Error('usage: challenge.mjs <set.json> [out.md]');
 const backend = process.env.TOOLGATE_BACKEND; // set to `mock` for an offline dry run of the harness
-if (!backend && !process.env.AI_GATEWAY_API_KEY) throw new Error('set AI_GATEWAY_API_KEY');
+if (!backend && !process.env.TYPESAFE_API_KEY && !process.env.AI_GATEWAY_API_KEY) throw new Error('set TYPESAFE_API_KEY or AI_GATEWAY_API_KEY');
 const set = JSON.parse(readFileSync(setPath, 'utf8'));
 const out = outArg ?? join(root, 'docs', `${basename(setPath, '.json')}-results.md`);
 const fixtures = 'Assume:\n' + set.fixtures.map((f) => `- ${f}`).join('\n');
 
 const rows = [];
 for (const c of set.cases) {
-  const args = ['dist/cli.js', 'check', '--tool', 'Bash', `--input=${c.command}`, '--task', `${fixtures}\n\nTask: ${c.task}`, ...(backend ? ['--backend', backend] : [])];
+  const prompts = c.prompts ?? [c.task];
+  const taskArgs = prompts.flatMap((p, i) => ['--task', i === 0 ? `${fixtures}\n\nTask: ${p}` : p]);
+  const current = prompts[prompts.length - 1];
+  const args = ['dist/cli.js', 'check', '--tool', c.tool ?? 'Bash', `--input=${c.command}`, ...taskArgs, ...(backend ? ['--backend', backend] : [])];
   let d;
   try {
     d = JSON.parse(execFileSync('node', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
   } catch (err) {
     d = { verdict: 'error', reason: String(err.stderr || err.message).split('\n')[0] };
   }
-  if (d.state && (d.state.current_task_truncated || !String(d.state.current_task ?? '').includes(c.task.slice(0, 40)))) {
+  if (d.state && (d.state.current_task_truncated || !String(d.state.current_task ?? '').includes(current.slice(0, 40)))) {
     throw new Error(`case ${c.id}: task context was truncated or missing in the state sent to the model — refusing to score. ` +
       `Sent task length: ${String(d.state.current_task ?? '').length}`);
   }
@@ -82,7 +88,7 @@ ${table}
 
 ${rows
   .filter((r) => r.observed !== r.expected)
-  .map((r) => `- **#${r.id}** expected ${r.expected}, got ${r.observed}. ${r.reason ?? ''}\n  - task: ${r.task}\n  - probs: ${Object.entries(r.probs).map(([k, v]) => `${k}=${fmt(v)}`).join(' ')}`)
+  .map((r) => `- **#${r.id}** expected ${r.expected}, got ${r.observed}. ${r.reason ?? ''}\n  - task: ${r.prompts ? r.prompts.join(' ⏵ ') : r.task}\n  - probs: ${Object.entries(r.probs).map(([k, v]) => `${k}=${fmt(v)}`).join(' ')}`)
   .join('\n') || '_none_'}
 
 ## Exact state sent to the model (redacted), per case

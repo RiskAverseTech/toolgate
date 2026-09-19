@@ -16,9 +16,10 @@ Usage:
   toolgate hook [--policy <path>] [--backend typesafe|gateway|mock]
       Run as a Claude Code PreToolUse hook (JSON in on stdin).
 
-  toolgate check --tool <name> --input=<json|string> [--task <text>] [--backend typesafe|gateway|mock]
+  toolgate check --tool <name> --input=<json|string> [--task <text>]... [--backend typesafe|gateway|mock]
       Dry-run a tool call against the policy and print the decision and the exact state sent.
-      --task supplies the "current task" so the context questions are asked.
+      --task supplies user prompts (repeatable, oldest first; the last is the current task)
+      so the context questions are asked.
 
   toolgate init [--print]
       Write ~/.toolgate/toolgate.yaml, save the API key for hooks, make one real test decision,
@@ -64,7 +65,7 @@ async function main(): Promise<void> {
       backend: { type: 'string' },
       tool: { type: 'string' },
       input: { type: 'string' },
-      task: { type: 'string' },
+      task: { type: 'string', multiple: true },
       n: { type: 'string', short: 'n', default: '20' },
       stats: { type: 'boolean' },
       print: { type: 'boolean' },
@@ -77,7 +78,7 @@ async function main(): Promise<void> {
     backend: str(values.backend),
     tool: str(values.tool),
     input: str(values.input),
-    task: str(values.task),
+    tasks: Array.isArray(values.task) ? values.task.filter((v): v is string => typeof v === 'string') : [],
     n: str(values.n),
     stats: values.stats === true,
     print: values.print === true,
@@ -103,10 +104,10 @@ async function main(): Promise<void> {
         toolInput = args.tool === 'Bash' ? { command: raw } : raw;
       }
       const input: HookInput = { tool_name: args.tool, tool_input: toolInput, cwd: process.cwd() };
-      if (args.task) {
-        // A one-line transcript so the context questions (off_task, authorized) are asked.
+      if (args.tasks.length > 0) {
+        // A transcript of user prompts (in order given; the last is the current task) so the context questions are asked.
         const transcript = join(mkdtempSync(join(tmpdir(), 'toolgate-')), 'transcript.jsonl');
-        writeFileSync(transcript, JSON.stringify({ type: 'user', message: { role: 'user', content: args.task } }) + '\n');
+        writeFileSync(transcript, args.tasks.map((t) => JSON.stringify({ type: 'user', message: { role: 'user', content: t } })).join('\n') + '\n');
         input.transcript_path = transcript;
       }
       const decision = await decide(input, policy, backend);
@@ -263,6 +264,12 @@ function printStats(lines: string[]): void {
   if (lat.length) console.log(`model latency (${lat.length} calls): p50 ${q(0.5)} ms, p90 ${q(0.9)} ms, max ${lat[lat.length - 1]} ms`);
   const tools = by('tool');
   console.log(`tools:    ${Object.entries(tools).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, v]) => `${k} ${v}`).join(', ')}`);
+  const modelRows = rows.filter((r) => r.source === 'model');
+  const withTask = modelRows.filter((r) => (r.task as { present?: boolean } | undefined)?.present === true).length;
+  const truncated = modelRows.filter((r) => r.input_truncated === true).length;
+  if (modelRows.length) console.log(`context:  task present ${withTask}/${modelRows.length}, input truncated ${truncated}/${modelRows.length}`);
+  const modes = by('permission_mode');
+  if (Object.keys(modes).some((k) => k !== 'undefined')) console.log(`modes:    ${Object.entries(modes).map(([k, v]) => `${k} ${v}`).join(', ')}`);
   const asked = rows.filter((r) => r.verdict === 'ask' || r.verdict === 'deny');
   if (asked.length) {
     console.log(`\nrecent ask/deny:`);

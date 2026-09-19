@@ -80,6 +80,19 @@ export interface Policy {
   include_task_context: boolean;
   /** Show a "[toolgate] all risks below …" line on allowed calls too. Off by default: asks and denies are always shown. */
   show_allows: boolean;
+  /**
+   * How much the model sees. Input beyond `input_chars` is cut (head + tail) and the verdict
+   * can then be no better than `ask`; the latest user prompt beyond `task_chars` likewise.
+   * `earlier_prompts`: how many user prompts before the latest to include as context, so a
+   * "yes" or "continue" is read together with the instruction it continues.
+   */
+  limits: { input_chars: number; task_chars: number; earlier_prompts: number };
+  /**
+   * In these Claude Code permission modes nobody answers a prompt, so an `ask` would be
+   * auto-resolved. `unattended.ask` says what an ask becomes there: `deny` (the model is told
+   * why and stops) or `ask` (unchanged).
+   */
+  unattended: { modes: string[]; ask: 'ask' | 'deny' };
   audit: { enabled: boolean; path: string; log_input: boolean };
   /** Risk questions; user questions are merged over the built-ins. */
   questions: Questions;

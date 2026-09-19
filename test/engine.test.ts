@@ -339,7 +339,7 @@ describe('v0.4 floors: violates_constraint and unresolved_choice', () => {
 
 describe('task context truncation', () => {
   it('flags a truncated task and caps the verdict at ask', async () => {
-    const long = 'Deploy to staging. '.repeat(400); // ~7600 chars > 4000 budget
+    const long = 'Deploy to staging. '.repeat(400); // ~7600 chars > 6000 budget
     const d = await decide(bashWithTask('npm test', long), defaultPolicy(), new StubBackend({}));
     expect(d.state?.current_task_truncated).toBe(true);
     expect(d.verdict).toBe('ask');
@@ -368,10 +368,45 @@ describe('latency split', () => {
 
 describe('truncated input can never be allowed outright', () => {
   it('caps the verdict at ask', async () => {
-    const big = 'echo ' + 'A'.repeat(8000);
+    const big = 'echo ' + 'A'.repeat(25000); // > 20 000 default
     const d = await decide(bash(big), defaultPolicy(), new StubBackend({}));
     expect(d.verdict).toBe('ask');
     expect(d.reason).toContain('too large');
+  });
+
+  it('an ordinary 8k-char file write is evaluated in full (the 0.5 cap caused 62% of real-usage asks)', async () => {
+    const d = await decide(bash('echo ' + 'A'.repeat(8000)), defaultPolicy(), new StubBackend({}));
+    expect(d.verdict).toBe('allow');
+  });
+
+  it('limits.input_chars is honored', async () => {
+    const p = defaultPolicy();
+    p.limits.input_chars = 1000;
+    const d = await decide(bash('echo ' + 'A'.repeat(1500)), p, new StubBackend({}));
+    expect(d.verdict).toBe('ask');
+  });
+});
+
+describe('unattended permission modes', () => {
+  const asking = new StubBackend({ destructive: 0.7 });
+  it('ask becomes deny in bypassPermissions / auto by default, with the mode named', async () => {
+    const d = await decide({ ...bash('x'), permission_mode: 'bypassPermissions' }, defaultPolicy(), asking);
+    expect(d.verdict).toBe('deny');
+    expect(d.reason).toContain('bypassPermissions');
+    expect((await decide({ ...bash('x'), permission_mode: 'auto' }, defaultPolicy(), asking)).verdict).toBe('deny');
+  });
+
+  it('unchanged in default mode, with no mode, or when unattended.ask is ask', async () => {
+    expect((await decide({ ...bash('x'), permission_mode: 'default' }, defaultPolicy(), asking)).verdict).toBe('ask');
+    expect((await decide(bash('x'), defaultPolicy(), asking)).verdict).toBe('ask');
+    const p = defaultPolicy();
+    p.unattended.ask = 'ask';
+    expect((await decide({ ...bash('x'), permission_mode: 'auto' }, p, asking)).verdict).toBe('ask');
+  });
+
+  it('never touches allow or deny', async () => {
+    expect((await decide({ ...bash('x'), permission_mode: 'auto' }, defaultPolicy(), new StubBackend({}))).verdict).toBe('allow');
+    expect((await decide({ ...bash('x'), permission_mode: 'auto' }, defaultPolicy(), new StubBackend({ destructive: 0.95 }))).verdict).toBe('deny');
   });
 });
 
@@ -407,5 +442,77 @@ describe('mock backend smoke', () => {
   });
   it('allows npm test', async () => {
     expect((await decide(bash('npm test'), defaultPolicy(), new MockBackend())).verdict).toBe('allow');
+  });
+});
+
+describe('task context from several prompts', () => {
+  const line = (e: unknown): string => JSON.stringify(e) + '\n';
+  const user = (content: string, extra: Record<string, unknown> = {}): string => line({ type: 'user', message: { role: 'user', content }, ...extra });
+  const toolResult = (bytes: number): string =>
+    line({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'x', content: 'R'.repeat(bytes) }] } });
+  const assistant = (): string => line({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }] } });
+
+  function transcript(body: string): string {
+    const path = join(mkdtempSync(join(tmpdir(), 'tg-tr-')), 't.jsonl');
+    writeFileSync(path, body);
+    return path;
+  }
+
+  it('the latest prompt is current_task; the two before it are earlier_prompts, oldest first', async () => {
+    const t = transcript(user('one') + assistant() + user('two: build the guide module') + assistant() + user('three') + assistant() + user('yes'));
+    const d = await decide({ ...bash('ls'), transcript_path: t }, defaultPolicy(), new StubBackend({}));
+    expect(d.state?.current_task).toBe('yes');
+    expect(d.state?.earlier_prompts).toEqual(['two: build the guide module', 'three']);
+  });
+
+  it('finds prompts behind megabytes of tool results (chunked backward read)', async () => {
+    const t = transcript(user('the real instruction') + assistant() + toolResult(3 * 1024 * 1024) + assistant() + toolResult(900 * 1024));
+    const d = await decide({ ...bash('ls'), transcript_path: t }, defaultPolicy(), new StubBackend({}));
+    expect(d.state?.current_task).toBe('the real instruction');
+  });
+
+  it('a prompt line longer than a chunk survives intact', async () => {
+    const huge = 'Task: ' + 'é'.repeat(300 * 1024); // multibyte, > 256 KiB chunk
+    const t = transcript(user('earlier') + assistant() + user(huge));
+    const d = await decide({ ...bash('ls'), transcript_path: t }, defaultPolicy(), new StubBackend({}));
+    expect(String(d.state?.current_task).startsWith('Task: éééé')).toBe(true);
+    expect(d.state?.current_task_truncated).toBe(true); // > task_chars
+    expect(d.state?.earlier_prompts).toEqual(['earlier']);
+  });
+
+  it('skips sidechain and meta entries, and tool_result-only user entries', async () => {
+    const t = transcript(user('real') + user('sub-agent chatter', { isSidechain: true }) + user('meta', { isMeta: true }) + toolResult(10));
+    const d = await decide({ ...bash('ls'), transcript_path: t }, defaultPolicy(), new StubBackend({}));
+    expect(d.state?.current_task).toBe('real');
+    expect(d.state?.earlier_prompts).toBeUndefined();
+  });
+
+  it('earlier prompts are cut without flagging truncation; limits.earlier_prompts = 0 disables them', async () => {
+    const t = transcript(user('E'.repeat(5000)) + user('now'));
+    const d = await decide({ ...bash('ls'), transcript_path: t }, defaultPolicy(), new StubBackend({}));
+    expect(d.state?.current_task_truncated).toBeUndefined();
+    expect(String((d.state?.earlier_prompts as string[])[0]).endsWith(' …')).toBe(true);
+    const p = defaultPolicy();
+    p.limits.earlier_prompts = 0;
+    const d0 = await decide({ ...bash('ls'), transcript_path: t }, p, new StubBackend({}));
+    expect(d0.state?.earlier_prompts).toBeUndefined();
+  });
+
+  it('context questions get the earlier-prompts note only when there are earlier prompts', async () => {
+    let seen: Questions = {};
+    const spy: DecisionBackend = {
+      name: 'spy',
+      async evaluate(_s, q) {
+        seen = q;
+        const out: Answers = {};
+        for (const k of Object.keys(q)) out[k] = { type: 'boolean', probability: 0.01 };
+        return out;
+      },
+    };
+    await decide({ ...bash('ls'), transcript_path: transcript(user('a') + user('b')) }, defaultPolicy(), spy);
+    expect(seen.off_task?.instructions).toContain('earlier_prompts');
+    expect(seen.destructive?.instructions).not.toContain('read together');
+    await decide({ ...bash('ls'), transcript_path: transcript(user('only')) }, defaultPolicy(), spy);
+    expect(seen.off_task?.instructions).not.toContain('read together');
   });
 });

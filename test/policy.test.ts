@@ -55,8 +55,17 @@ describe('policy loading', () => {
     ['inverted thresholds', 'thresholds:\n  ask: 0.9\n  deny: 0.5\n'],
     ['bad provider', 'backend:\n  provider: gatway\n'],
     ['non-boolean show_allows', 'show_allows: yes please\n'],
+    ['tiny input limit', 'limits:\n  input_chars: 10\n'],
+    ['bad unattended.ask', 'unattended:\n  ask: allow\n'],
+    ['bad unattended.modes', 'unattended:\n  modes: auto\n'],
   ])('rejects invalid policy: %s', (_name, yaml) => {
     expect(() => loadPolicy(tmpPolicy(yaml))).toThrow();
+  });
+
+  it('limits and unattended merge over defaults', () => {
+    const p = loadPolicy(tmpPolicy('limits:\n  input_chars: 30000\nunattended:\n  ask: ask\n'));
+    expect(p.limits).toEqual({ input_chars: 30000, task_chars: 6000, earlier_prompts: 2 });
+    expect(p.unattended).toEqual({ modes: ['bypassPermissions', 'auto', 'dontAsk'], ask: 'ask' });
   });
 
   it('show_allows defaults off and can be turned on', () => {

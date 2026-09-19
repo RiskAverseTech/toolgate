@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.0 — what the first 151 real decisions demanded
+Everything here comes from one evening of ordinary use with the hook installed (docs/usage-2026-09-19.md): 40% of tool calls were asks, and the log showed most of them were toolgate's own doing.
+- `limits.input_chars` 6 000 → 20 000: the old cap alone caused 62% of asks (ordinary source-file Writes and Edits, on which the model had already said "all risks below 55%"). `limits.task_chars` 4 000 → 6 000. Both are now policy settings.
+- Task context is the latest user prompt **plus the two before it** (`earlier_prompts`, `limits.earlier_prompts`). The context questions are told to read them together, because the latest prompt in a working session is usually "yes" or "go ahead" — `off_task` was being judged against two words, and every `off_task` ask in the log was wrong.
+- The transcript is read backwards in 256 KB chunks until the prompts are found (up to 16 MB), instead of a fixed 256 KB tail: 39% of model calls had no task context at all, most plausibly because a few large tool results pushed the last prompt out of the tail. Multi-byte characters are carried across chunk boundaries as bytes.
+- Question wording, from the false positives: `destructive` no longer lists "kills processes" and says stopping or restarting a dev server, watcher, or job is not destruction (four of seven real denies were the agent stopping its own dev server). `exfiltration` is "this tool call itself, when executed" and excludes writing code that would make network calls later. `violates_constraint` says "ask me before X" is not a prohibition (the set-3 defect).
+- `unattended`: Claude Code reports its permission mode to the hook; in `bypassPermissions`, `auto`, and `dontAsk` nobody answers a prompt, so an `ask` becomes a `deny` with the reason fed to the model. All 60 asks in the log were resolved in Auto mode without the user seeing one. `unattended.ask: ask` restores the old behavior.
+- Audit log: `permission_mode`, `input_chars`, `input_truncated`, and `task` ({present, chars, truncated, earlier_prompts, head}) per decision; `audit --stats` reports context presence, truncation, and modes. Diagnosing `off_task` needs the task, and the log did not have it.
+- `toolgate check --task` is repeatable (oldest first). `scripts/challenge.mjs` accepts `prompts: [...]` and `tool` per case and either API key.
+- New development set docs/challenge-set-4.json (12 cases, 6 pairs) modeled on the real failures. It is not held-out: the wording was tuned with it in view. Frozen sets 2 and 3 are rerun for regression.
+
 ## 0.5.3 — the hook must prove it is on
 - Found on the second real install: `doctor` passed every check while the hook was not running at all, because everything it checked ran from the user's shell — the one environment Claude Code does not launch hooks from.
 - `toolgate init` now installs the hook into `~/.claude/settings.json` itself (backup kept, existing hooks preserved, idempotent) instead of printing a snippet to paste. `toolgate install` refreshes it; `init --print` still prints the snippet.

@@ -1,9 +1,11 @@
 import { closeSync, fstatSync, openSync, readSync } from 'node:fs';
-import type { HookInput, JSONObject, JSONValue } from './types.js';
+import type { HookInput, JSONObject, JSONValue, Policy } from './types.js';
 
-const MAX_TASK_CHARS = 4000;
-const MAX_INPUT_CHARS = 6000;
-const TRANSCRIPT_TAIL_BYTES = 256 * 1024;
+export type Limits = Policy['limits'];
+export const DEFAULT_LIMITS: Limits = { input_chars: 20000, task_chars: 6000, earlier_prompts: 2 };
+/** Read the transcript backwards in chunks: a few large tool results can push the last real prompt megabytes from the end. */
+const TRANSCRIPT_CHUNK_BYTES = 256 * 1024;
+const TRANSCRIPT_MAX_BYTES = 16 * 1024 * 1024;
 
 const SECRET_PATTERNS: Array<[RegExp, string]> = [
   [/\b([A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD)[A-Z0-9_]*\s*[=:]\s*)\S+/gi, '$1[redacted]'],
@@ -25,21 +27,28 @@ function redactDeep(v: JSONValue): JSONValue {
 }
 
 /**
- * The state the decision model evaluates: JSON-clean, secrets redacted,
- * oversized input truncated (head + tail, flagged so the engine can't `allow` on it).
+ * The state the decision model evaluates: JSON-clean, secrets redacted, oversized input
+ * truncated (head + tail, flagged so the engine can't `allow` on it). `current_task` is the
+ * latest user prompt; `earlier_prompts` (oldest first) are the ones before it, because in a
+ * working session the latest prompt is often "yes" or "continue".
  */
-export function buildState(input: HookInput, includeTaskContext: boolean): JSONObject {
+export function buildState(input: HookInput, includeTaskContext: boolean, limits: Limits = DEFAULT_LIMITS): JSONObject {
   const state: JSONObject = {
     tool: input.tool_name,
-    tool_input: truncateMiddle(redactDeep(toJSON(input.tool_input)), MAX_INPUT_CHARS),
+    tool_input: truncateMiddle(redactDeep(toJSON(input.tool_input)), limits.input_chars),
   };
   if (input.cwd) state.cwd = input.cwd;
   if (input.permission_mode) state.permission_mode = input.permission_mode;
   if (includeTaskContext && input.transcript_path) {
-    const task = lastUserPrompt(input.transcript_path);
-    if (task) {
-      state.current_task = redact(task.text);
-      if (task.truncated) state.current_task_truncated = true;
+    const [latest, ...earlier] = recentUserPrompts(input.transcript_path, 1 + limits.earlier_prompts);
+    if (latest !== undefined) {
+      state.current_task = redact(latest.slice(0, limits.task_chars));
+      if (latest.length > limits.task_chars) state.current_task_truncated = true;
+      if (earlier.length > 0) {
+        // Older prompts are context, not the instruction under judgment: cut them without flagging.
+        const each = Math.max(200, Math.floor(limits.task_chars / 2));
+        state.earlier_prompts = earlier.reverse().map((t) => redact(t.length > each ? t.slice(0, each) + ' …' : t));
+      }
     }
   }
   return state;
@@ -68,26 +77,51 @@ export function matchText(toolInput: unknown): string {
   return parts.join('\n').replace(/["'\\]/g, '');
 }
 
-/** Most recent real user prompt from a Claude Code transcript (JSONL). Best-effort, tail-only read. */
-export function lastUserPrompt(transcriptPath: string): { text: string; truncated: boolean } | undefined {
+/** Most recent real user prompt from a Claude Code transcript (JSONL). */
+export function lastUserPrompt(transcriptPath: string): string | undefined {
+  return recentUserPrompts(transcriptPath, 1)[0];
+}
+
+/**
+ * The last `count` real user prompts, newest first. Reads the file backwards in chunks
+ * and stops as soon as it has enough, so a transcript full of large tool results still
+ * yields the prompts. Best-effort: any failure means no task context, never a failed gate.
+ */
+export function recentUserPrompts(transcriptPath: string, count: number): string[] {
+  const found: string[] = [];
+  if (count <= 0) return found;
   let fd: number | undefined;
   try {
     fd = openSync(transcriptPath, 'r');
-    const size = fstatSync(fd).size;
-    const length = Math.min(size, TRANSCRIPT_TAIL_BYTES);
-    const buf = Buffer.alloc(length);
-    readSync(fd, buf, 0, length, size - length);
-    const lines = buf.toString('utf8').split('\n');
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const text = userText(lines[i]);
-      if (text) return { text: text.slice(0, MAX_TASK_CHARS), truncated: text.length > MAX_TASK_CHARS };
+    let end = fstatSync(fd).size;
+    const floor = Math.max(0, end - TRANSCRIPT_MAX_BYTES);
+    let carry = Buffer.alloc(0); // the (possibly partial) first line of the previous chunk, as bytes so UTF-8 never splits
+    while (end > floor && found.length < count) {
+      const start = Math.max(floor, end - TRANSCRIPT_CHUNK_BYTES);
+      const buf = Buffer.alloc(end - start);
+      readSync(fd, buf, 0, end - start, start);
+      const chunk = Buffer.concat([buf, carry]);
+      let complete = chunk;
+      carry = Buffer.alloc(0);
+      if (start > floor) {
+        // Not at the file start: the first line may be cut, so hold it back for the next chunk.
+        const nl = chunk.indexOf(0x0a);
+        complete = nl >= 0 ? chunk.subarray(nl + 1) : Buffer.alloc(0);
+        carry = nl >= 0 ? chunk.subarray(0, nl) : chunk;
+      }
+      const lines = complete.toString('utf8').split('\n');
+      for (let i = lines.length - 1; i >= 0 && found.length < count; i--) {
+        const text = userText(lines[i]);
+        if (text) found.push(text);
+      }
+      end = start;
     }
   } catch {
     // Task context is a nice-to-have; never fail the gate over it.
   } finally {
     if (fd !== undefined) closeSync(fd);
   }
-  return undefined;
+  return found;
 }
 
 function userText(line: string | undefined): string | undefined {

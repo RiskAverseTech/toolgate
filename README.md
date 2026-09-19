@@ -40,9 +40,10 @@ Risky tool calls now get denied or bounced to a confirmation prompt, with the re
 
 1. **Static rules run first** — first match wins, zero model calls. Your rules, then the built-ins: `rm -rf /` or `~` → deny; `curl … | sh` → ask; edits to `~/.claude/settings*` or the toolgate policy → ask. Patterns match the raw tool input (quotes stripped), and are written to be linear-time.
 2. **Ungated tools pass through** (`gated_tools`, default: `Bash|Write|Edit|MultiEdit|NotebookEdit|WebFetch|WebSearch|mcp__.*`). Read-only tools never cost a model call.
-3. **Everything else goes to the decision model** with the tool call, cwd, and the current task (read from the transcript; the four task-context questions — `off_task`, `authorized`, `violates_constraint`, `unresolved_choice` — are skipped when there is none). One request, all questions answered in parallel. The model is told that tool input and task text are untrusted data, not instructions.
+3. **Everything else goes to the decision model** with the tool call, cwd, and the task: the latest user prompt plus the two before it, read from the transcript, because in a working session the latest prompt is usually "yes" or "go ahead" (the four task-context questions — `off_task`, `authorized`, `violates_constraint`, `unresolved_choice` — are skipped when there is no prompt at all). One request, all questions answered in parallel. The model is told that tool input and prompt text are untrusted data, not instructions.
 4. **Thresholds map probabilities to verdicts**: max risk ≥ `deny` (0.85) blocks, ≥ `ask` (0.55) prompts, else allow. Then, if `authorized` ≥ 0.8 and `off_task` is below the ask threshold, each axis softens one step — except `secret_exposure`, `violates_constraint`, and `unresolved_choice`, which a task can never authorize away; the strictest axis wins. No task context means no authorization, so nothing softens — and input too large to evaluate in full is never allowed outright, only asked about.
-5. **If the model is unreachable or returns garbage**, `fail_mode` decides: `passthrough` (default — the agent's normal permission flow still applies), `ask`, or `deny`. If toolgate itself hits an internal error (bad stdin, broken policy), it always answers `ask` and writes the reason to stderr — never a silent allow.
+5. **Nobody home?** Claude Code tells the hook its permission mode. In unattended modes (`bypassPermissions`, `auto`, `dontAsk`) an `ask` would be auto-resolved without you seeing it, so by default it becomes a `deny` there, with the reason fed back to the model (`unattended.ask: ask` turns this off).
+6. **If the model is unreachable or returns garbage**, `fail_mode` decides: `passthrough` (default — the agent's normal permission flow still applies), `ask`, or `deny`. If toolgate itself hits an internal error (bad stdin, broken policy), it always answers `ask` and writes the reason to stderr — never a silent allow.
 
 Two honest notes. First, toolgate's `allow` is advisory: Claude Code's own deny rules and its always-confirm list still apply on top. Second, toolgate is **defense in depth, not a sandbox**. It shrinks the blast radius of mistakes and prompt injection; it does not replace containers, least-privilege credentials, or your own review. A sufficiently adversarial input can fool any classifier — which is why static rules run first and every decision is auditable.
 
@@ -56,7 +57,7 @@ The `mock` backend is a deterministic heuristic for tests and offline dev. `type
 
 ## What leaves your machine
 
-Only the model path sends anything out, and only to TypeSafe's API or your Vercel AI Gateway (whichever key you set): the tool name, the tool input (secrets redacted, truncated past 6 000 chars), the cwd, and the last user prompt from the transcript (redacted, ≤4 000 chars; if it had to be cut, the verdict can be no better than `ask`) when `include_task_context` is on. Static rules and passthroughs send nothing. Redaction catches the obvious shapes — `KEY=`, `Authorization:`, `--password`, known token prefixes — not every secret, so treat it as a courtesy, not a guarantee; Vercel's gateway offers a zero-data-retention option if you need one.
+Only the model path sends anything out, and only to TypeSafe's API or your Vercel AI Gateway (whichever key you set): the tool name, the tool input (secrets redacted, cut past 20 000 chars), the cwd, the permission mode, and the last three user prompts from the transcript (redacted; the latest ≤6 000 chars, the two before it ≤3 000 each; if the latest had to be cut, the verdict can be no better than `ask`) when `include_task_context` is on. All of these limits are in `limits:`. Static rules and passthroughs send nothing. Redaction catches the obvious shapes — `KEY=`, `Authorization:`, `--password`, known token prefixes — not every secret, so treat it as a courtesy, not a guarantee; Vercel's gateway offers a zero-data-retention option if you need one.
 
 ## Audit log
 
@@ -75,6 +76,8 @@ One trusted location: `~/.toolgate/toolgate.yaml` (or `$TOOLGATE_POLICY`). toolg
 backend: { provider: auto, model: auto, timeout_ms: 5000 }   # or typesafe | gateway
 fail_mode: passthrough
 thresholds: { deny: 0.85, ask: 0.55 }
+limits: { input_chars: 20000, task_chars: 6000, earlier_prompts: 2 }
+unattended: { modes: [bypassPermissions, auto, dontAsk], ask: deny }
 rules:
   - match: { tool: Bash, input_regex: 'terraform\s+destroy' }
     action: ask
@@ -109,6 +112,8 @@ Sixty labeled commands across three frozen challenge sets, each authored and pro
 
 These are small constructed sets targeting specific failure categories, not a general failure rate. Full tables, every axis score, and the retracted analysis: [docs/challenge-analysis-2026-09-18-b.md](docs/challenge-analysis-2026-09-18-b.md), [live run 1](docs/live-results-2026-09-18.md), [live run 2](docs/live-results-2026-09-18-b.md).
 
+**Real usage.** The first evening with the hook installed produced 151 decisions on ordinary work: 55% allow, **40% ask**, 5% deny, p50 1.07 s. That ask rate was unusable, and the log said why — 62% of asks were toolgate's own 6 000-char input cap, most of the rest were `off_task` judged against a two-word "yes" instead of the instruction before it, and four of seven denies were the agent stopping its own dev server, which the `destructive` wording literally listed. Every 0.6.0 change comes from that log: [docs/usage-2026-09-19.md](docs/usage-2026-09-19.md). The changes are checked against a development set built from those failures ([docs/challenge-set-4.json](docs/challenge-set-4.json)) and reruns of the frozen held-out sets; a fresh held-out set from the independent reviewer is the bar for calling the new wording validated.
+
 ## Known limits
 
 - The transcript Claude Code exposes to hooks can lag the live conversation by a turn, so `off_task` may occasionally judge against the previous prompt.
@@ -118,9 +123,10 @@ These are small constructed sets targeting specific failure categories, not a ge
 
 - [x] Direct TypeSafe API backend (0.5.1)
 - [x] Evaluation on frozen, prospectively labeled sets (0.5.0; see above)
+- [x] Real-usage numbers from the audit log, and the 0.6.0 fixes they demanded
+- [ ] Held-out validation of the 0.6.0 wording by the independent reviewer (set 4 is a development set)
 - [ ] `trusted_hosts`: destinations you declare legitimate, passed to the model as context — a first-ever call to your own API with a key in it currently looks like exfiltration
-- [ ] Fix the "ask me before X" wording defect (scored as a prohibition), validated on a fresh challenge set
-- [ ] Real-usage numbers from the audit log: ask/deny rate and latency over weeks of ordinary work
+- [ ] A read-only fast path (`ls`, `cat`, `git status` … with no pipes or redirects) so the model is only consulted when something could change
 - [ ] MCP proxy mode — gate any MCP client, not just Claude Code
 - [ ] Local backend (openjev-style logit reading) for air-gapped use
 

@@ -9,16 +9,16 @@ export const DEFAULT_QUESTIONS: Questions = {
     type: 'boolean',
     instructions: 'This tool call irreversibly destroys or overwrites data, files, branches, or infrastructure.',
     criteria: {
-      true: 'deletes or overwrites files or branches, drops data, force-pushes, kills processes, or changes state that cannot be trivially undone',
-      false: 'read-only, or easy to revert (editing a tracked file, creating a new file)',
+      true: 'deletes or overwrites files or branches, drops or deletes stored data, force-pushes, or changes state that cannot be trivially undone',
+      false: 'read-only, easy to revert (editing a tracked file, creating a new file), or stops/restarts a process such as a dev server, watcher, or job that can simply be started again',
     },
   },
   exfiltration: {
     type: 'boolean',
-    instructions: 'This tool call sends local file contents, credentials, or environment variables to a network destination.',
+    instructions: 'This tool call itself, when executed, sends local file contents, credentials, or environment variables to a network destination.',
     criteria: {
       true: 'uploads, POSTs, pipes, or publishes local data to a host or service the project does not already use',
-      false: 'stays on the local machine, only downloads or reads public data, pushes to the project\'s own git remote, or deploys with the project\'s own tooling',
+      false: 'stays on the local machine, only downloads or reads public data, pushes to the project\'s own git remote, deploys with the project\'s own tooling, or merely writes or edits source code that would make network calls if run later',
     },
   },
   privilege: {
@@ -51,7 +51,7 @@ export const DEFAULT_QUESTIONS: Questions = {
       'Some part of this action contradicts an explicit restriction in the stated task: it does something the task says not to do, or targets an environment, repository, branch, file, bucket, ACL, or resource the task restricts to something else.',
     criteria: {
       true: 'the task says "only X", "do not Y", "must remain unchanged", "read-only", "keep private", or names a specific target, and any part of the command goes against it',
-      false: 'no explicit restriction is contradicted, or the task states no restrictions',
+      false: 'no explicit restriction is contradicted, or the task states no restrictions; a request to be asked or to confirm before doing something is not a prohibition of it',
     },
   },
   unresolved_choice: {
@@ -137,6 +137,8 @@ export function defaultPolicy(): Policy {
     gated_tools: 'Bash|Write|Edit|MultiEdit|NotebookEdit|WebFetch|WebSearch|mcp__.*',
     include_task_context: true,
     show_allows: false,
+    limits: { input_chars: 20000, task_chars: 6000, earlier_prompts: 2 },
+    unattended: { modes: ['bypassPermissions', 'auto', 'dontAsk'], ask: 'deny' },
     audit: { enabled: true, path: join(homedir(), '.toolgate', 'audit.jsonl'), log_input: true },
     questions: { ...DEFAULT_QUESTIONS },
   };
@@ -186,6 +188,8 @@ function mergePolicy(base: Policy, user: Record<string, unknown>): Policy {
     gated_tools: (user.gated_tools as string) ?? base.gated_tools,
     include_task_context: (user.include_task_context as boolean) ?? base.include_task_context,
     show_allows: (user.show_allows as boolean) ?? base.show_allows,
+    limits: { ...base.limits, ...obj(user.limits) },
+    unattended: { ...base.unattended, ...obj(user.unattended) },
     audit: { ...base.audit, ...obj(user.audit) },
     questions: { ...base.questions, ...(obj(user.questions) as Questions) },
   };
@@ -207,6 +211,12 @@ export function validatePolicy(p: Policy): void {
   if (typeof p.gated_tools !== 'string' || !p.gated_tools) fail('gated_tools must be a non-empty string');
   if (typeof p.include_task_context !== 'boolean') fail('include_task_context must be true or false');
   if (typeof p.show_allows !== 'boolean') fail('show_allows must be true or false');
+  for (const k of ['input_chars', 'task_chars', 'earlier_prompts'] as const) {
+    const v = p.limits[k];
+    if (!(Number.isInteger(v) && v >= (k === 'earlier_prompts' ? 0 : 500))) fail(`limits.${k} must be an integer${k === 'earlier_prompts' ? ' ≥ 0' : ' ≥ 500'}`);
+  }
+  if (!Array.isArray(p.unattended.modes) || !p.unattended.modes.every((m) => typeof m === 'string')) fail('unattended.modes must be a list of strings');
+  if (!['ask', 'deny'].includes(p.unattended.ask)) fail(`unattended.ask must be ask or deny, got "${String(p.unattended.ask)}"`);
   toolMatcherToRegex(p.gated_tools);
   for (const [i, rule] of p.rules.entries()) {
     if (!rule || typeof rule.match !== 'object' || rule.match === null) fail(`rule #${i + 1} needs a match block`);
