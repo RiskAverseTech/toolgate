@@ -156,7 +156,8 @@ These are small constructed sets targeting specific failure categories, not a ge
 - [x] Real-usage numbers from the audit log, and the 0.6.0 fixes they demanded
 - [ ] Held-out validation of the 0.6.0 wording by the independent reviewer (set 4 is a development set)
 - [ ] `trusted_hosts`: destinations you declare legitimate, passed to the model as context — a first-ever call to your own API with a key in it currently looks like exfiltration
-- [ ] **Local backend** (openjev-style, on-device) so nothing leaves the machine — the priority, since the hosted model is itself a data path
+- [ ] **Local backend** (openjev-style, on-device) so nothing leaves the machine — the priority, since the hosted model is itself a data path. Acceptance bar: it must match the hosted model on the frozen sets and on a live allow-review slice before it ships, or fail-safe plus a miscalibrated local model just becomes deny-spam that pushes people back to passthrough.
+- [ ] **Multi-step composition**: bind a later call to earlier writes, or treat "run a file this session just created" as its own risk axis, to catch the write-a-helper-then-exec pattern a one-shot scorer misses.
 - [ ] A read-only fast path (`ls`, `cat`, `git status` … with no pipes or redirects) so the model is only consulted when something could change
 - [x] MCP proxy mode — gate any MCP client, not just Claude Code (0.7.0)
 
@@ -175,6 +176,12 @@ toolgate is defense in depth, not a sandbox. To report a vulnerability, see [SEC
 
 ## Credits
 
-Built by Jaz (Risk Averse Technology Company) with Claude (Fable 5.1, in Cowork). Hardened through three independent adversarial audits run as Claude subagents, and seven rounds of product and correctness review by ChatGPT (GPT-6 Astra), who also authored and prospectively labeled four challenge sets including the adversarial set 5 — the "capability is not harm" critique behind v0.2.0, the per-axis floor in v0.3.2, the constraint and reserved-choice questions in v0.4.0, and the truncation bug that invalidated an evaluation in v0.4.1 are theirs. Every finding is recorded in [CHANGELOG.md](CHANGELOG.md).
+Built by Jaz (Risk Averse Technology Company) with Claude (in Cowork), and hardened in the open through adversarial review by two independent models from other labs.
+
+ChatGPT (GPT-6 Astra High) ran seven rounds of product and correctness review and authored and prospectively labeled four challenge sets including the adversarial set 5. The "capability is not harm" critique behind v0.2.0, the per-axis floor in v0.3.2, the constraint and reserved-choice questions in v0.4.0, and the truncation bug that invalidated an evaluation in v0.4.1 are theirs.
+
+Grok (xAI) reviewed the security posture and drove v0.7.1: the fail-safe default (`fail_mode: ask`, since a firewall that allows when its checker is down is the state an attacker wants) and the allow-side audit review. The measurement standard below and the multi-step-composition roadmap item are its framing.
+
+Every finding is recorded in [CHANGELOG.md](CHANGELOG.md).
 
 MIT © Risk Averse Technology Company LLC
