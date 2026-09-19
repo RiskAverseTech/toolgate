@@ -55,7 +55,7 @@ const html = `<!doctype html><html><head><meta charset="utf-8"><style>
 </style></head><body>
   <div class="head">
     <div class="title">toolgate <span>· open auto mode for AI agents</span></div>
-    <div class="sub">Claude Code hook · TypeSafe Jev via Vercel AI Gateway</div>
+    <div class="sub">Claude Code hook · TypeSafe Jev, direct or via Vercel AI Gateway</div>
   </div>
   <div class="cases">${cases.map(row).join('')}</div>
   <div class="foot">

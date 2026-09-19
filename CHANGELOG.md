@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.3 — the hook must prove it is on
+- Found on the second real install: `doctor` passed every check while the hook was not running at all, because everything it checked ran from the user's shell — the one environment Claude Code does not launch hooks from.
+- `toolgate init` now installs the hook into `~/.claude/settings.json` itself (backup kept, existing hooks preserved, idempotent) instead of printing a snippet to paste. `toolgate install` refreshes it; `init --print` still prints the snippet.
+- The installed command names `node` and toolgate's `cli.js` by absolute path. The previous absolute-path bin still needed `node` on PATH via its shebang; under `env -i` it failed with "node: No such file or directory".
+- `doctor` now also checks the key file exists, that a toolgate hook is present in settings and is the current command, and runs the installed command exactly as Claude Code would (`sh -c`, JSON on stdin) under a minimal environment — system PATH, no shell exports, no keys, throwaway mock policy — and requires a decision back. A stale bare `toolgate hook` entry fails this test, as it should.
+- A missing API key was an "internal error" that turned every gated call into an `ask` — even ones a static rule would have settled. It is now "decision model unavailable": static rules still run first, then `fail_mode` decides, so the default `passthrough` shows `[toolgate] NOT gating: … no API key found` and defers to Claude Code's normal flow, as the 0.5.2 notes already claimed.
+- Allowed calls no longer emit a `[toolgate] …` line on every gated tool call; asks, denies, and fail-mode passthroughs still do. `show_allows: true` restores the old behavior.
+- Docs pass: the opening line said Jev was reached "via Vercel AI Gateway" — direct API has been the default since 0.5.1 when `TYPESAFE_API_KEY` is set. Task-context cap is 4 000 chars (the README still said 1 200, the pre-0.4.1 value). Context questions are four, not two. Roadmap and credits brought up to date. npm `homepage`, `bugs`, and keywords added.
+- New this release, not fixed: a first-ever call from a fresh project to its own API with a credential in the command scores as exfiltration and is denied (observed live: a Claude Code session posting to `api.typesafe.ai`). Jev's criteria say "a host the project does not already use", which a brand-new project cannot satisfy. `trusted_hosts` is on the roadmap; until then run such calls yourself, or add a narrowly scoped static rule.
+
 ## 0.5.2 — the hook must never be silently off
 - Found on the first real install: a GUI-launched Claude Code has neither npm's global bin on PATH nor `.zshrc` exports, so the hook either was not found or ran without a key and passed everything through silently.
 - `init` now writes the settings snippet with the binary's absolute path, and saves the API key to `~/.toolgate/env` (0600). Both the CLI and the hook load that file when the variable is not already set.

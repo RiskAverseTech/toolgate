@@ -23,8 +23,13 @@ thresholds:
 # Tools the model evaluates (whole-name match; exact, a|b list, or regex).
 gated_tools: "Bash|Write|Edit|MultiEdit|NotebookEdit|WebFetch|WebSearch|mcp__.*"
 
-# Pull the current task from the transcript so `off_task` has context.
+# Pull the current task from the transcript so the context questions
+# (off_task, authorized, violates_constraint, unresolved_choice) have something to judge against.
 include_task_context: true
+
+# Asks and denies always show a "[toolgate] …" line in Claude Code. Allows are quiet
+# unless this is on — the hook runs on every gated call.
+show_allows: false
 
 audit:
   enabled: true

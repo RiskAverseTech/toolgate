@@ -16,7 +16,7 @@ export type Answers = Record<string, BooleanAnswer>;
 export type JSONValue = string | number | boolean | null | JSONValue[] | { [key: string]: JSONValue };
 export type JSONObject = { [key: string]: JSONValue };
 
-/** A pluggable decision model. Jev via Vercel AI Gateway is the reference implementation. */
+/** A pluggable decision model. TypeSafe's Jev (direct API, or via Vercel AI Gateway) is the reference implementation. */
 export interface DecisionBackend {
   readonly name: string;
   evaluate(state: JSONObject, questions: Questions, opts?: { timeoutMs?: number }): Promise<Answers>;
@@ -78,6 +78,8 @@ export interface Policy {
   gated_tools: string;
   /** Read the current task from the transcript so `off_task` has context. */
   include_task_context: boolean;
+  /** Show a "[toolgate] all risks below …" line on allowed calls too. Off by default: asks and denies are always shown. */
+  show_allows: boolean;
   audit: { enabled: boolean; path: string; log_input: boolean };
   /** Risk questions; user questions are merged over the built-ins. */
   questions: Questions;

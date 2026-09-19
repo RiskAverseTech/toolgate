@@ -1,28 +1,34 @@
 {
   "name": "@riskaverse/toolgate",
-  "version": "0.5.2",
-  "description": "Open auto mode for AI agents: a calibrated tool-call firewall powered by decision models (TypeSafe Jev via Vercel AI Gateway). Ships as a Claude Code PreToolUse hook.",
+  "version": "0.5.3",
+  "description": "Open auto mode for AI agents: a calibrated tool-call firewall powered by TypeSafe's Jev decision model (direct API or Vercel AI Gateway). Ships as a Claude Code PreToolUse hook.",
   "keywords": [
     "jev",
     "typesafe",
     "system-one",
     "claude-code",
+    "claude-code-hooks",
+    "pretooluse",
     "hooks",
-    "agent",
+    "ai-agents",
+    "agent-safety",
     "guardrails",
     "firewall",
+    "tool-calling",
+    "llm-security",
     "ai-gateway"
   ],
-  "license": "MIT",
-  "author": "Risk Averse Technology Company LLC",
+  "homepage": "https://github.com/RiskAverseTech/toolgate#readme",
+  "bugs": {
+    "url": "https://github.com/RiskAverseTech/toolgate/issues"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/RiskAverseTech/toolgate"
   },
+  "license": "MIT",
+  "author": "Risk Averse Technology Company LLC",
   "type": "module",
-  "engines": {
-    "node": ">=20"
-  },
   "bin": {
     "toolgate": "dist/cli.js"
   },
@@ -34,6 +40,9 @@
     "README.md",
     "LICENSE"
   ],
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",

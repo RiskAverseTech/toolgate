@@ -1,31 +1,35 @@
 #!/usr/bin/env node
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
-import { homedir } from 'node:os';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { runHook, makeBackend, resolveProvider } from './hook.js';
 import { loadEnvFile, loadPolicy, policyPath } from './policy.js';
 import { decide } from './engine.js';
+import { SETTINGS_PATH, hookCommand, hookSelfTest, installHook, installedHookCommands, readSettings, settingsSnippet, writeSettings } from './install.js';
 import type { HookInput } from './types.js';
 
 const HELP = `toolgate — a calibrated tool-call firewall for AI agents
 
 Usage:
-  toolgate hook [--policy <path>] [--backend gateway|mock]
+  toolgate hook [--policy <path>] [--backend typesafe|gateway|mock]
       Run as a Claude Code PreToolUse hook (JSON in on stdin).
 
-  toolgate check --tool <name> --input=<json|string> [--task <text>] [--backend gateway|mock]
-      Dry-run a tool call against the policy and print the decision.
-      --task supplies the "current task" so off_task/authorized are asked.
+  toolgate check --tool <name> --input=<json|string> [--task <text>] [--backend typesafe|gateway|mock]
+      Dry-run a tool call against the policy and print the decision and the exact state sent.
+      --task supplies the "current task" so the context questions are asked.
 
-  toolgate init
-      Write ~/.toolgate/toolgate.yaml, make one real test decision, print the settings snippet.
+  toolgate init [--print]
+      Write ~/.toolgate/toolgate.yaml, save the API key for hooks, make one real test decision,
+      install the hook into ~/.claude/settings.json (backup kept), and verify it runs.
+      --print shows the settings snippet instead of writing it.
+
+  toolgate install
+      (Re)install the hook into ~/.claude/settings.json — e.g. after upgrading node or toolgate.
 
   toolgate doctor
-      Check keys, backend, policy, and make one real test decision.
+      Check policy, keys, key file, backend, one real decision, and that the installed hook answers.
 
   toolgate audit [-n <count>] [--stats]
       Show recent audit log entries, or summary statistics (ask/deny rate, latency).
@@ -35,32 +39,6 @@ Environment (one key is enough; TYPESAFE_API_KEY wins when both are set):
   AI_GATEWAY_API_KEY   Vercel AI Gateway key (vercel.com/<team>/~/ai)
   TOOLGATE_POLICY      Policy file path (default ~/.toolgate/toolgate.yaml)
 `;
-
-/**
- * The hook command uses the absolute path of this binary: Claude Code spawns hooks
- * with a minimal PATH (no npm global bin), and `npx toolgate` would resolve to an
- * unrelated package of that name on npm.
- */
-function settingsSnippet(): string {
-  let bin = 'toolgate';
-  try {
-    bin = execFileSync('sh', ['-c', 'command -v toolgate'], { encoding: 'utf8' }).trim() || bin;
-  } catch {
-    /* fall back to the bare name */
-  }
-  return `{
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "*",
-        "hooks": [
-          { "type": "command", "command": "${bin} hook", "timeout": 10, "statusMessage": "toolgate: checking tool call" }
-        ]
-      }
-    ]
-  }
-}`;
-}
 
 const ENV_FILE = join(homedir(), '.toolgate', 'env');
 
@@ -89,6 +67,7 @@ async function main(): Promise<void> {
       task: { type: 'string' },
       n: { type: 'string', short: 'n', default: '20' },
       stats: { type: 'boolean' },
+      print: { type: 'boolean' },
       help: { type: 'boolean', short: 'h' },
     },
   });
@@ -101,6 +80,7 @@ async function main(): Promise<void> {
     task: str(values.task),
     n: str(values.n),
     stats: values.stats === true,
+    print: values.print === true,
     help: values.help === true,
   };
   const cmd = positionals[0] ?? 'hook';
@@ -142,12 +122,22 @@ async function main(): Promise<void> {
         copyFileSync(EXAMPLE_POLICY, path);
         console.log(`Wrote ${path}`);
       }
-      const ok = await doctor(args.policy, args.backend);
       const saved = saveKeyFile();
-      if (saved) console.log(`✓ key saved to ${saved} (0600) so hooks work even when Claude Code is launched from the Dock`);
-      console.log(`\nAdd to ~/.claude/settings.json (merge into an existing "hooks" block if you have one):\n\n${settingsSnippet()}`);
-      console.log('\nThen quit and reopen Claude Code. Verify with: toolgate audit -n 5 after a few commands.');
+      if (saved) console.log(`Saved key to ${saved} (0600) so hooks work even when Claude Code is launched from the Dock`);
+      if (args.print) {
+        console.log(`\nAdd to ${SETTINGS_PATH} (merge into an existing "hooks" block if you have one):\n\n${settingsSnippet()}`);
+      } else {
+        install();
+      }
+      console.log('');
+      const ok = await doctor(args.policy, args.backend);
+      console.log(ok ? '\nQuit and reopen Claude Code. After a few commands: toolgate audit -n 5' : '\nFix the ✗ lines above, then run: toolgate doctor');
       if (!ok) process.exitCode = 1;
+      return;
+    }
+
+    case 'install': {
+      install();
       return;
     }
 
@@ -200,8 +190,9 @@ async function doctor(policyPath?: string, backendOverride?: string): Promise<bo
   line(hasTs || hasGw || backendOverride === 'mock', `keys: TYPESAFE_API_KEY ${hasTs ? 'set' : 'not set'}, AI_GATEWAY_API_KEY ${hasGw ? 'set' : 'not set'}`);
   let backend;
   try {
+    const provider = resolveProvider(backendOverride ?? policy.backend.provider); // throws with no key
     backend = makeBackend(policy, backendOverride);
-    line(true, `backend: ${backend.name} (provider ${resolveProvider(backendOverride ?? policy.backend.provider)})`);
+    line(true, `backend: ${backend.name} (provider ${provider})`);
   } catch (err) {
     line(false, `backend: ${err instanceof Error ? err.message : err}`);
     console.log('  get a key at console.typesafe.ai (API Keys) or vercel.com/<team>/~/ai, export it, and run `toolgate doctor` again');
@@ -215,7 +206,41 @@ async function doctor(policyPath?: string, backendOverride?: string): Promise<bo
   }
   const top = Object.entries(d.probabilities ?? {}).sort((a, b) => b[1] - a[1])[0];
   line(true, `test decision: \`git push --force origin main\` → ${d.verdict} (${top?.[0]} ${top?.[1]}) in ${d.latencyMs} ms`);
-  return true;
+
+  // The checks above prove toolgate works from this shell. The ones below prove it works
+  // from Claude Code, which is launched without this shell's PATH or exports.
+  let ok = true;
+  const keyFile = existsSync(ENV_FILE) && /^(TYPESAFE_API_KEY|AI_GATEWAY_API_KEY)=./m.test(readFileSync(ENV_FILE, 'utf8'));
+  if (backendOverride !== 'mock') {
+    line(keyFile, keyFile ? `key file: ${ENV_FILE} (read by the hook when Claude Code has no shell exports)` : `key file: ${ENV_FILE} missing — run \`toolgate init\`; without it a Dock-launched Claude Code has no key`);
+    ok &&= keyFile;
+  }
+  let commands: string[] = [];
+  try {
+    commands = installedHookCommands(readSettings());
+  } catch (err) {
+    line(false, `settings: ${err instanceof Error ? err.message : err}`);
+    return false;
+  }
+  const installed = commands[0];
+  if (installed === undefined) {
+    line(false, `hook: not installed in ${SETTINGS_PATH} — run \`toolgate install\``);
+    return false;
+  }
+  const current = installed === hookCommand();
+  line(current, current ? `hook: installed in ${SETTINGS_PATH}` : `hook: installed but not the current command (\`${installed}\`) — run \`toolgate install\` to refresh`);
+  const self = hookSelfTest(installed);
+  line(self.ok, `hook self-test: ${self.detail}`);
+  return ok && self.ok;
+}
+
+/** Merge the hook into ~/.claude/settings.json, keeping a backup of whatever was there. */
+function install(): void {
+  const settings = readSettings();
+  const result = installHook(settings);
+  if (result === 'unchanged') return console.log(`Hook already installed in ${SETTINGS_PATH}`);
+  const backup = writeSettings(settings);
+  console.log(`${result === 'added' ? 'Installed' : 'Updated'} hook in ${SETTINGS_PATH}${backup ? ` (backup: ${backup})` : ''}:\n  ${hookCommand()}`);
 }
 
 function printStats(lines: string[]): void {

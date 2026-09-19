@@ -136,16 +136,12 @@ export function defaultPolicy(): Policy {
     rules: [...DEFAULT_RULES],
     gated_tools: 'Bash|Write|Edit|MultiEdit|NotebookEdit|WebFetch|WebSearch|mcp__.*',
     include_task_context: true,
+    show_allows: false,
     audit: { enabled: true, path: join(homedir(), '.toolgate', 'audit.jsonl'), log_input: true },
     questions: { ...DEFAULT_QUESTIONS },
   };
 }
 
-/**
- * Policy lives in ONE trusted place: an explicit path, $TOOLGATE_POLICY, or
- * ~/.toolgate/toolgate.yaml. Deliberately no per-project discovery — a cloned
- * repo must never be able to reconfigure the firewall.
- */
 /**
  * Load API keys from ~/.toolgate/env (KEY=value lines, mode 0600) when they are not
  * already in the environment. Hooks spawned by a GUI-launched Claude Code never
@@ -161,6 +157,11 @@ export function loadEnvFile(path = join(homedir(), '.toolgate', 'env')): void {
   }
 }
 
+/**
+ * Policy lives in ONE trusted place: an explicit path, $TOOLGATE_POLICY, or
+ * ~/.toolgate/toolgate.yaml. Deliberately no per-project discovery — a cloned
+ * repo must never be able to reconfigure the firewall.
+ */
 export function policyPath(explicit?: string): string {
   return expandTilde(explicit ?? process.env.TOOLGATE_POLICY ?? join(homedir(), '.toolgate', 'toolgate.yaml'));
 }
@@ -184,6 +185,7 @@ function mergePolicy(base: Policy, user: Record<string, unknown>): Policy {
     rules: [...(Array.isArray(user.rules) ? (user.rules as StaticRule[]) : []), ...base.rules],
     gated_tools: (user.gated_tools as string) ?? base.gated_tools,
     include_task_context: (user.include_task_context as boolean) ?? base.include_task_context,
+    show_allows: (user.show_allows as boolean) ?? base.show_allows,
     audit: { ...base.audit, ...obj(user.audit) },
     questions: { ...base.questions, ...(obj(user.questions) as Questions) },
   };
@@ -203,6 +205,8 @@ export function validatePolicy(p: Policy): void {
   if (!(ask >= 0 && ask <= deny && deny <= 1)) fail('thresholds must satisfy 0 <= ask <= deny <= 1');
   if (!(authorized >= 0 && authorized <= 1)) fail('thresholds.authorized must be in [0, 1]');
   if (typeof p.gated_tools !== 'string' || !p.gated_tools) fail('gated_tools must be a non-empty string');
+  if (typeof p.include_task_context !== 'boolean') fail('include_task_context must be true or false');
+  if (typeof p.show_allows !== 'boolean') fail('show_allows must be true or false');
   toolMatcherToRegex(p.gated_tools);
   for (const [i, rule] of p.rules.entries()) {
     if (!rule || typeof rule.match !== 'object' || rule.match === null) fail(`rule #${i + 1} needs a match block`);

@@ -32,8 +32,28 @@ export function resolveProvider(provider: string): 'typesafe' | 'gateway' | 'moc
   throw new Error('no API key found: set TYPESAFE_API_KEY (console.typesafe.ai) or AI_GATEWAY_API_KEY (vercel.com/<team>/~/ai)');
 }
 
+/**
+ * A missing key is "decision model unavailable", not an internal error: static rules still
+ * run, and the policy's fail_mode decides the rest (passthrough shows "[toolgate] NOT gating").
+ */
+class UnavailableBackend implements DecisionBackend {
+  readonly name = 'unavailable';
+  constructor(private readonly why: string) {}
+  async warm(): Promise<void> {
+    throw new Error(this.why);
+  }
+  async evaluate(): Promise<Answers> {
+    throw new Error(this.why);
+  }
+}
+
 export function makeBackend(policy: Policy, override?: string): DecisionBackend {
-  const provider = resolveProvider(override ?? policy.backend.provider);
+  let provider: string;
+  try {
+    provider = resolveProvider(override ?? policy.backend.provider);
+  } catch (err) {
+    return new UnavailableBackend(message(err));
+  }
   const model = policy.backend.model === 'auto' ? undefined : policy.backend.model;
   if (provider === 'mock') return new MockBackend();
   if (provider === 'gateway') return new LazyGatewayBackend(model ?? 'typesafe-ai/jev');
@@ -57,22 +77,28 @@ class LazyTypeSafeBackend implements DecisionBackend {
   }
 }
 
-/** Claude Code PreToolUse JSON. Silence (undefined) means "no opinion": the normal permission flow applies. */
-export function toHookOutput(decision: Decision): Record<string, unknown> | undefined {
+/**
+ * Claude Code PreToolUse JSON. Silence (undefined) means "no opinion": the normal
+ * permission flow applies. Asks and denies always carry a user-visible systemMessage;
+ * allows are quiet unless `show_allows` is on — the hook runs on every gated call, and
+ * a line per allowed `ls` is noise.
+ */
+export function toHookOutput(decision: Decision, opts: { showAllows?: boolean } = {}): Record<string, unknown> | undefined {
   if (decision.verdict === 'passthrough') {
     // No opinion is silent — except when the model was unreachable: a firewall that
     // switches itself off must say so. No permissionDecision, so the normal flow applies.
     return decision.source === 'fail-mode' ? { systemMessage: `[toolgate] NOT gating: ${decision.reason}` } : undefined;
   }
   const reason = `[toolgate] ${decision.reason}`;
-  return {
-    systemMessage: reason, // shown to the user
+  const out: Record<string, unknown> = {
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
       permissionDecision: decision.verdict,
-      permissionDecisionReason: reason, // shown to the model
+      permissionDecisionReason: reason, // fed back to the model on deny; shown in the prompt on ask
     },
   };
+  if (decision.verdict !== 'allow' || opts.showAllows) out.systemMessage = reason; // shown to the user
+  return out;
 }
 
 async function readStdin(): Promise<string> {
@@ -98,7 +124,7 @@ export async function runHook(opts: { policyPath?: string; backend?: string } = 
     const decision = await decide(input, policy, backend);
     if (decision.source !== 'no-opinion') writeAudit(policy, input, decision, backend.name);
     if (decision.source === 'fail-mode') process.stderr.write(`toolgate: ${decision.reason}\n`); // never silent
-    out = toHookOutput(decision);
+    out = toHookOutput(decision, { showAllows: policy.show_allows });
   } catch (err) {
     const why = message(err);
     process.stderr.write(`toolgate: ${why}\n`);

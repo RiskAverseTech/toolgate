@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "toolgate hook",
+            "command": "/opt/homebrew/bin/node /opt/homebrew/lib/node_modules/@riskaverse/toolgate/dist/cli.js hook",
             "timeout": 10,
             "statusMessage": "toolgate: checking tool call"
           }

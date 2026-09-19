@@ -54,8 +54,14 @@ describe('policy loading', () => {
     ['rule without match', 'rules:\n  - action: deny\n'],
     ['inverted thresholds', 'thresholds:\n  ask: 0.9\n  deny: 0.5\n'],
     ['bad provider', 'backend:\n  provider: gatway\n'],
+    ['non-boolean show_allows', 'show_allows: yes please\n'],
   ])('rejects invalid policy: %s', (_name, yaml) => {
     expect(() => loadPolicy(tmpPolicy(yaml))).toThrow();
+  });
+
+  it('show_allows defaults off and can be turned on', () => {
+    expect(defaultPolicy().show_allows).toBe(false);
+    expect(loadPolicy(tmpPolicy('show_allows: true\n')).show_allows).toBe(true);
   });
 
   it('an empty key falls back to the default instead of crashing', () => {
