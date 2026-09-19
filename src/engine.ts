@@ -70,11 +70,12 @@ export async function decide(input: HookInput, policy: Policy, backend: Decision
   //   - the action is on-task (off_task below ask) — this is what stops a reservation for one
   //     step from covering unrelated destruction bundled into the same command.
   // off_task itself is never softened this way, and UNSOFTENABLE axes (secret_exposure,
-  // violates_constraint, unresolved_choice) never are — so a genuine prohibition, which scores
-  // violates_constraint at deny level, still denies on its own and needs no separate gate here.
-  // (v0.6.3 also gated on violates_constraint < ask; that regressed legitimate reserved choices
-  // whose phrasing drew a middling violates_constraint from the model — set 3 #19 — while adding
-  // nothing, since a real prohibition is already unsoftenable. Removed in v0.6.4.)
+  // violates_constraint, unresolved_choice) keep their own scored verdict. Tradeoff to know:
+  // an unsoftenable axis preserves its level, it does not force deny — a prohibition the model
+  // scores at ask level (say 0.70) yields ask, not deny. So dropping the separate
+  // violates_constraint gate (v0.6.3 gated on violates_constraint < ask, which regressed the
+  // legitimate reserved choice in set 3 #19) means we rely on the prohibition classifier to
+  // score genuine restrictions strongly; the off_task gate is what stops reservation transfer.
   const reservedP = answers.unresolved_choice?.probability;
   const reservedChoice =
     typeof reservedP === 'number' &&
