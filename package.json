@@ -1,6 +1,6 @@
 {
   "name": "@riskaverse/toolgate",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Open auto mode for AI agents: a calibrated tool-call firewall powered by TypeSafe's Jev decision model (direct API or Vercel AI Gateway). Ships as a Claude Code PreToolUse hook.",
   "keywords": [
     "agent-safety",
@@ -27,7 +27,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/RiskAverseTech/toolgate"
+    "url": "git+https://github.com/RiskAverseTech/toolgate.git"
   },
   "license": "MIT",
   "author": "Risk Averse Technology Company LLC",

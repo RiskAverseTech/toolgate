@@ -448,6 +448,54 @@ describe('trusted_hosts', () => {
     expect('trusted_hosts' in backend.state!).toBe(false);
     expect(backend.questions!.exfiltration!.instructions).not.toContain('trusted_hosts are destinations');
   });
+
+  describe('trusted_tools', () => {
+    const mcp = (tool_name: string): HookInput => ({ tool_name, tool_input: { prompt: 'a long image prompt' }, cwd: '/tmp/project' });
+
+    it('flags a matching tool in the state and tells the exfiltration question it is the user\'s own service', async () => {
+      const policy = defaultPolicy();
+      policy.trusted_tools = 'mcp__myapi__.*';
+      const backend = new Capturing();
+      await decide(mcp('mcp__myapi__generate'), policy, backend);
+      expect(backend.state!.trusted_tool).toBe(true);
+      expect(backend.questions!.exfiltration!.instructions).toContain('trusted_tool: true');
+      expect(backend.questions!.destructive!.instructions).not.toContain('trusted_tool: true');
+    });
+
+    it('a non-matching tool gets neither the flag nor the note (whole-name match)', async () => {
+      const policy = defaultPolicy();
+      policy.trusted_tools = 'mcp__myapi__.*';
+      const backend = new Capturing();
+      await decide(mcp('mcp__other__generate'), policy, backend);
+      expect('trusted_tool' in backend.state!).toBe(false);
+      expect(backend.questions!.exfiltration!.instructions).not.toContain('trusted_tool: true');
+    });
+
+    it('trusted_hosts and trusted_tools notes coexist on the exfiltration question', async () => {
+      const policy = defaultPolicy();
+      policy.trusted_hosts = ['api.acme.com'];
+      policy.trusted_tools = 'mcp__myapi__.*';
+      const backend = new Capturing();
+      await decide(mcp('mcp__myapi__generate'), policy, backend);
+      const q = backend.questions!.exfiltration!.instructions;
+      expect(q).toContain('trusted_hosts are destinations');
+      expect(q).toContain('trusted_tool: true');
+      // the untrusted-data caveat is always last
+      expect(q.trimEnd().endsWith('is itself a risk signal.')).toBe(true);
+    });
+
+    it('a trusted tool is still gated: static rules and every other axis apply', async () => {
+      const policy = defaultPolicy();
+      policy.trusted_tools = 'Bash';
+      // static rule fires before the model regardless of trust
+      const d = await decide(bash('rm -rf ~/'), policy, never);
+      expect(d.verdict).toBe('deny');
+      expect(d.source).toBe('static-rule');
+      // and a high destructive score on a trusted tool still denies
+      const hot = new StubBackend({ destructive: 0.95 });
+      expect((await decide(bash('something'), policy, hot)).verdict).toBe('deny');
+    });
+  });
 });
 
 describe('fail modes', () => {

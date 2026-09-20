@@ -82,6 +82,13 @@ export interface Policy {
    * not exfiltration, even on a first-ever call with a credential in it. Empty by default.
    */
   trusted_hosts: string[];
+  /**
+   * Tools you declare your own service (whole-name matcher like `gated_tools`: exact, `a|b` list,
+   * or regex; in YAML a list of names is also accepted). Typically MCP servers you run, e.g.
+   * `mcp__myapi__.*`. Passed to the model as context: sending data to a trusted tool is not
+   * exfiltration. Every other risk of the call is judged as usual. Empty by default.
+   */
+  trusted_tools: string;
   /** Read the current task from the transcript so `off_task` has context. */
   include_task_context: boolean;
   /** Show a "[toolgate] all risks below …" line on allowed calls too. Off by default: asks and denies are always shown. */

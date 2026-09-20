@@ -106,6 +106,7 @@ thresholds: { deny: 0.85, ask: 0.55 }
 limits: { input_chars: 20000, task_chars: 6000, earlier_prompts: 2 }
 unattended: { modes: [bypassPermissions, dontAsk], ask: deny }
 trusted_hosts: [api.acme.com]        # your own hosts — sending data there isn't exfiltration
+trusted_tools: "mcp__myapi__.*"      # your own MCP servers/tools — same idea, by tool name
 rules:
   - match: { tool: Bash, input_regex: 'terraform\s+destroy' }
     action: ask
@@ -119,6 +120,8 @@ questions:
 See [`examples/toolgate.yaml`](examples/toolgate.yaml) for every knob.
 
 **`trusted_hosts`** are destinations you declare legitimate for your work (bare hostnames, e.g. `api.acme.com`). They're passed to the model as context, so sending data to a trusted host — or any subdomain of it — is judged as using your own remote, not exfiltration. This is the fix for a real false positive: a first-ever call from a fresh project to its own API with a credential in it satisfies "a host the project doesn't already use" and otherwise scores as a leak. `trusted_hosts` only ever *relaxes* the exfiltration axis for hosts you name; every other axis (and every other host) is unaffected, and secrets are still redacted before anything leaves the machine.
+
+**`trusted_tools`** is the same idea keyed on tool name, for the MCP case: an MCP tool call carries no hostname, so a long prompt sent to an MCP server you run can score as exfiltration (observed live at 0.50–0.60 on an image-generation tool, essentially a coin flip). Declare your own tools with the same whole-name matcher syntax as `gated_tools` (exact, `a|b` list, regex, or a YAML list of names), e.g. `trusted_tools: "mcp__myapi__.*"`. The model is told that sending data to that tool is not exfiltration. It is *not* an allow-list: a trusted tool is still gated, static rules still run first, and destructive, privilege, off-task, and every other axis are judged as usual.
 
 ## Library use
 
@@ -159,6 +162,7 @@ These are small constructed sets targeting specific failure categories, not a ge
 - [x] Real-usage numbers from the audit log, and the 0.6.0 fixes they demanded
 - [ ] Held-out validation of the 0.6.0 wording by the independent reviewer (set 4 is a development set)
 - [x] `trusted_hosts`: destinations you declare legitimate, passed to the model as context so a first-ever call to your own API with a key in it is not read as exfiltration (0.8.0)
+- [x] `trusted_tools`: the same for MCP tools you run, which carry no hostname (0.9.0)
 - [ ] **Local backend** (openjev-style, on-device) so nothing leaves the machine — the priority, since the hosted model is itself a data path. Acceptance bar: it must match the hosted model on the frozen sets and on a live allow-review slice before it ships, or fail-safe plus a miscalibrated local model just becomes deny-spam that pushes people back to passthrough.
 - [ ] **Multi-step composition**: bind a later call to earlier writes, or treat "run a file this session just created" as its own risk axis, to catch the write-a-helper-then-exec pattern a one-shot scorer misses.
 - [ ] A read-only fast path (`ls`, `cat`, `git status` … with no pipes or redirects) so the model is only consulted when something could change

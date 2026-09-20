@@ -31,6 +31,14 @@ trusted_hosts: []
 #  - api.acme.com
 #  - hooks.internal.acme.com
 
+# Tools you declare your own service — typically MCP servers you run, which carry no hostname
+# for trusted_hosts to match. Same whole-name matcher as gated_tools (exact, a|b, regex), or a
+# YAML list of names. Tells the model that sending data to this tool is not exfiltration. NOT an
+# allow-list: static rules still run first and every other risk axis is judged as usual.
+trusted_tools: ""
+#  trusted_tools: "mcp__myapi__.*"
+#  trusted_tools: [mcp__myapi__upload, mcp__myapi__generate]
+
 # Pull the current task from the transcript so the context questions
 # (off_task, authorized, violates_constraint, unresolved_choice) have something to judge against.
 include_task_context: true

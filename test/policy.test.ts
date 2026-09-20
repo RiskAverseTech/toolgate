@@ -94,6 +94,30 @@ describe('policy loading', () => {
     });
   });
 
+  describe('trusted_tools', () => {
+    it('defaults to no trusted tools', () => {
+      expect(defaultPolicy().trusted_tools).toBe('');
+    });
+
+    it('accepts a matcher string', () => {
+      expect(loadPolicy(tmpPolicy('trusted_tools: "mcp__myapi__.*"\n')).trusted_tools).toBe('mcp__myapi__.*');
+    });
+
+    it('joins a YAML list of names into one whole-name matcher', () => {
+      const p = loadPolicy(tmpPolicy('trusted_tools:\n  - mcp__myapi__upload\n  - mcp__myapi__.*\n'));
+      expect(p.trusted_tools).toBe('mcp__myapi__upload|mcp__myapi__.*');
+      const re = toolMatcherToRegex(p.trusted_tools);
+      expect(re.test('mcp__myapi__upload')).toBe(true);
+      expect(re.test('mcp__myapi__anything')).toBe(true);
+      expect(re.test('mcp__other__upload')).toBe(false);
+      expect(re.test('Bash')).toBe(false);
+    });
+
+    it('rejects an invalid regex matcher', () => {
+      expect(() => loadPolicy(tmpPolicy('trusted_tools: "mcp__(oops"\n'))).toThrow();
+    });
+  });
+
   it('an empty key falls back to the default instead of crashing', () => {
     expect(loadPolicy(tmpPolicy('gated_tools:\n')).gated_tools).toBe(defaultPolicy().gated_tools);
   });

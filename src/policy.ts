@@ -136,6 +136,7 @@ export function defaultPolicy(): Policy {
     rules: [...DEFAULT_RULES],
     gated_tools: 'Bash|Write|Edit|MultiEdit|NotebookEdit|WebFetch|WebSearch|mcp__.*',
     trusted_hosts: [],
+    trusted_tools: '',
     include_task_context: true,
     show_allows: false,
     limits: { input_chars: 20000, task_chars: 6000, earlier_prompts: 2 },
@@ -190,6 +191,8 @@ function mergePolicy(base: Policy, user: Record<string, unknown>): Policy {
     // A list replaces, it does not merge: the user states the full set of trusted destinations.
     // A single host may be written as a scalar (`trusted_hosts: api.acme.com`).
     trusted_hosts: normalizeHosts(user.trusted_hosts, base.trusted_hosts),
+    // A matcher string, or a YAML list of tool names joined into one.
+    trusted_tools: normalizeMatcher(user.trusted_tools, base.trusted_tools),
     include_task_context: (user.include_task_context as boolean) ?? base.include_task_context,
     show_allows: (user.show_allows as boolean) ?? base.show_allows,
     limits: { ...base.limits, ...obj(user.limits) },
@@ -217,6 +220,8 @@ export function validatePolicy(p: Policy): void {
   for (const h of p.trusted_hosts) {
     if (!h || /\s/.test(h) || h.includes('://') || h.includes('/')) fail(`trusted_hosts entry "${h}" must be a bare hostname (e.g. api.acme.com), not a URL or path`);
   }
+  if (typeof p.trusted_tools !== 'string') fail('trusted_tools must be a tool matcher string or a list of tool names');
+  if (p.trusted_tools) toolMatcherToRegex(p.trusted_tools);
   if (typeof p.include_task_context !== 'boolean') fail('include_task_context must be true or false');
   if (typeof p.show_allows !== 'boolean') fail('show_allows must be true or false');
   for (const k of ['input_chars', 'task_chars', 'earlier_prompts'] as const) {
@@ -259,6 +264,16 @@ export function expandTilde(p: string): string {
 
 function obj(v: unknown): Record<string, unknown> {
   return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+}
+
+/** A tool matcher: a string as-is, or a list of names joined with `|`. Empty/other falls back. */
+function normalizeMatcher(v: unknown, fallback: string): string {
+  if (typeof v === 'string') return v.trim() || fallback;
+  if (Array.isArray(v)) {
+    const names = v.map((n) => String(n).trim()).filter(Boolean);
+    return names.length > 0 ? names.join('|') : fallback;
+  }
+  return fallback;
 }
 
 /** trusted_hosts as a trimmed string list; a single host may be given as a scalar. Empty/other falls back. */

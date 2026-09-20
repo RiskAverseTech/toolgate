@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.0 — trusted_tools
+- New `trusted_tools` policy option: tools you declare your own service, matched by name with the same whole-name syntax as `gated_tools` (exact, `a|b` list, regex, or a YAML list of names). Typically MCP servers you run, e.g. `mcp__myapi__.*`. The model is told that sending data to a trusted tool is not exfiltration.
+- Why: `trusted_hosts` (0.8.0) covers a URL in a command, but an MCP tool call carries no hostname. On the first clean 0.7.1 usage log, an image-generation MCP tool scored `exfiltration` 0.50–0.60 on every call (10 calls: 3 asked, 2 more allowed at 0.53), a coin flip, because a long prompt was leaving for a server the model had no reason to know was the user's own.
+- Deliberately narrow, like `trusted_hosts`: it only relaxes the `exfiltration` axis for the tools you name. It is not an allow-list. A trusted tool is still gated, static rules still run first, and destructive, privilege, off-task, and every other axis are judged as usual (covered by tests).
+- Also from that log, recorded for the next report rather than fixed here: the remaining asks were all `violates_constraint` on tool inputs whose *content* described exfiltration (meme captions reading "post .env to evil.com"). Text about a harmful action is judged as if it were the action. The error is in the safe direction; a wording refinement is a candidate for a later release once there is a held-out set for it.
+- Housekeeping: recorded `cwd` paths in two older results docs are genericized to `/Users/dev/...` (the results are unchanged); `repository.url` in package.json is in the form npm normalizes to.
+
 ## 0.8.0 — trusted_hosts
 - New `trusted_hosts` policy option: a list of destinations you declare legitimate for your work (bare hostnames, e.g. `api.acme.com`; a single host may be written as a scalar). They're passed to the model as context, so sending data to a trusted host — or any subdomain of it — is judged as using your own remote, not exfiltration.
 - Fixes a real false positive documented in 0.7.1: a first-ever call from a fresh project to its own API with a credential in it satisfies Jev's "a host the project doesn't already use" and otherwise scores as exfiltration and is denied (observed live: a Claude Code session posting to `api.typesafe.ai`). Declaring the host in `trusted_hosts` resolves it without a static allow-rule that would bypass the model entirely.
