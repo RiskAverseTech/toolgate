@@ -19,7 +19,16 @@ const TRUSTED_TOOL_NOTE =
  * decision model -> thresholds. Backend failure or malformed answers fall
  * back to policy.fail_mode.
  */
-export async function decide(input: HookInput, policy: Policy, backend: DecisionBackend): Promise<Decision> {
+export interface DecideOptions {
+  /**
+   * Override the policy's `trusted_tools` matcher for this call. The MCP proxy uses it to bind
+   * trust to what the downstream server actually advertised (and to `--trusted`), rather than
+   * to a name a caller merely claims.
+   */
+  trustedTool?: boolean;
+}
+
+export async function decide(input: HookInput, policy: Policy, backend: DecisionBackend, opts: DecideOptions = {}): Promise<Decision> {
   const text = matchText(input.tool_input);
   for (const [i, rule] of policy.rules.entries()) {
     const toolOk = rule.match.tool === undefined || toolMatcherToRegex(rule.match.tool).test(input.tool_name);
@@ -33,7 +42,7 @@ export async function decide(input: HookInput, policy: Policy, backend: Decision
     return { verdict: 'passthrough', reason: `Tool "${input.tool_name}" is not gated`, source: 'no-opinion' };
   }
 
-  const trustedTool = policy.trusted_tools !== '' && toolMatcherToRegex(policy.trusted_tools).test(input.tool_name);
+  const trustedTool = opts.trustedTool ?? (policy.trusted_tools !== '' && toolMatcherToRegex(policy.trusted_tools).test(input.tool_name));
   const state = buildState(input, policy.include_task_context, policy.limits, policy.trusted_hosts, trustedTool);
   const questions = prepareQuestions(policy.questions, 'current_task' in state, 'earlier_prompts' in state, {
     trustedHosts: 'trusted_hosts' in state,

@@ -484,6 +484,19 @@ describe('trusted_hosts', () => {
       expect(q.trimEnd().endsWith('is itself a risk signal.')).toBe(true);
     });
 
+    it('a caller can override the matcher per call (the proxy binds trust to what the server advertised)', async () => {
+      const policy = defaultPolicy();
+      policy.trusted_tools = 'mcp__myapi__.*';
+      // matcher says yes, caller says no (name was not advertised) → no trust
+      let backend = new Capturing();
+      await decide(mcp('mcp__myapi__generate'), policy, backend, { trustedTool: false });
+      expect('trusted_tool' in backend.state!).toBe(false);
+      // matcher says no, caller says yes (--trusted on this server) → trust
+      backend = new Capturing();
+      await decide(mcp('mcp__other__generate'), policy, backend, { trustedTool: true });
+      expect(backend.state!.trusted_tool).toBe(true);
+    });
+
     it('a trusted tool is still gated: static rules and every other axis apply', async () => {
       const policy = defaultPolicy();
       policy.trusted_tools = 'Bash';

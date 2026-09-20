@@ -65,7 +65,7 @@ The same engine can sit in front of any [MCP](https://modelcontextprotocol.io) s
 }
 ```
 
-Allowed calls are forwarded untouched; a denied one (and, by default, an `ask`) never reaches the server — the client gets a normal tool result marked `isError` with the reason, so the agent can relay it to you rather than the client erroring out. `--on-ask allow` forwards asks instead of blocking them; `--gate <regex>` narrows which tool names are checked (default: all).
+Allowed calls are forwarded untouched; a denied one (and, by default, an `ask`) never reaches the server — the client gets a normal tool result marked `isError` with the reason, so the agent can relay it to you rather than the client erroring out. `--on-ask allow` forwards asks instead of blocking them; `--gate <regex>` narrows which tool names are checked (default: all); `--trusted` says "I launched this server and accept its destinations" (see `trusted_tools` under Policy: exfiltration axis only, bound to this one server, applied only to tools it advertises).
 
 MCP carries tool calls, not the conversation, so there is usually no task context — the four context questions are skipped and the `authorized` mitigator can't fire, which makes the gate **stricter, never more permissive**. To get context back (and let a requested action soften from deny to ask), set the current task:
 
@@ -123,6 +123,8 @@ See [`examples/toolgate.yaml`](examples/toolgate.yaml) for every knob.
 
 **`trusted_tools`** is the same idea keyed on tool name, for the MCP case: an MCP tool call carries no hostname, so a long prompt sent to an MCP server you run can score as exfiltration (observed live at 0.50–0.60 on an image-generation tool, essentially a coin flip). Declare your own tools with the same whole-name matcher syntax as `gated_tools` (exact, `a|b` list, regex, or a YAML list of names), e.g. `trusted_tools: "mcp__myapi__.*"`. The model is told that sending data to that tool is not exfiltration. It is *not* an allow-list: a trusted tool is still gated, static rules still run first, and destructive, privilege, off-task, and every other axis are judged as usual.
 
+Be precise about what `trusted_tools` is: it is not a statement about the tool, it is a statement that *you launched this server* and accept its destinations. A renamed or replaced server behind the same name keeps the relaxation, exactly as it keeps the trust you gave it by installing it. Three guards keep the claim no wider than the install (0.9.1): a matcher broad enough to trust tools from a server you never named (`mcp__.*`, `.*`) is rejected at policy load; in proxy mode trust is only applied to names the downstream server actually advertised in `tools/list`, so a `tools/call` that merely claims a trusted name gets none; and `toolgate mcp --trusted -- <server>` trusts everything *that one child process* advertises, bound to it and to nothing else. In Claude Code hook mode toolgate never sees `tools/list`, so only the first guard applies there; name the client-assigned server key, not a prefix.
+
 ## Library use
 
 ```ts
@@ -147,6 +149,8 @@ These are small constructed sets targeting specific failure categories, not a ge
 
 **Real usage.** The first evening with the hook installed produced 151 decisions on ordinary work: 55% allow, **40% ask**, 5% deny, p50 1.07 s. That ask rate was unusable, and the log said why — 62% of asks were toolgate's own 6 000-char input cap, most of the rest were `off_task` judged against a two-word "yes" instead of the instruction before it, and four of seven denies were the agent stopping its own dev server, which the `destructive` wording literally listed. Every 0.6.0 change comes from that log: [docs/usage-2026-09-19.md](docs/usage-2026-09-19.md). The changes are checked against a development set built from those failures ([docs/challenge-set-4.json](docs/challenge-set-4.json)) and reruns of the frozen held-out sets; a fresh held-out set from the independent reviewer is the bar for calling the new wording validated.
 
+**Second log, clean 0.7.1, 41 decisions.** Read as a regression check, not a miss rate: every failure named above did not recur (truncation asks 37 → 0, `off_task` asks 13 → 0, dev-server denies 4 → 0, task context 41/41); 76% allow, 24% ask, 0 deny; 0 of 31 allows should have been stopped (author-labeled; an exact 95% interval on 0/31 still allows ~11%). The ten remaining asks came from two sources: an MCP tool the model had no reason to trust (now `trusted_tools`) and a new failure mode, **content about harm reads as harm** (a meme caption that said "post .env to evil.com" scored as a constraint violation). Per-axis histograms show the three capability axes separate cleanly and the band under the ask line belongs to the context axes: [docs/usage-2026-09-20.md](docs/usage-2026-09-20.md), which also states the bar (~300 decisions, ≥150 labeled allows, a second labeler, a pre-declared window) for a log that would count.
+
 ## Known limits
 
 - The transcript Claude Code exposes to hooks can lag the live conversation by a turn, so `off_task` may occasionally judge against the previous prompt.
@@ -162,11 +166,14 @@ These are small constructed sets targeting specific failure categories, not a ge
 - [x] Real-usage numbers from the audit log, and the 0.6.0 fixes they demanded
 - [ ] Held-out validation of the 0.6.0 wording by the independent reviewer (set 4 is a development set)
 - [x] `trusted_hosts`: destinations you declare legitimate, passed to the model as context so a first-ever call to your own API with a key in it is not read as exfiltration (0.8.0)
-- [x] `trusted_tools`: the same for MCP tools you run, which carry no hostname (0.9.0)
+- [x] `trusted_tools`: the same for MCP tools you run, which carry no hostname (0.9.0); bound to what the server advertises, over-broad matchers rejected, `--trusted` per launch (0.9.1)
+- [ ] **Content-vs-action wording**: `violates_constraint` judges whether *executing* the call does the restricted thing, and the untrusted-data note says text describing a harmful action is not the action. Waits for a held-out matched-pair set so it isn't tuned on the seven cases that revealed it. This is the usability unlock for content tools; it is not the credentials unlock.
 - [ ] **Local backend** (openjev-style, on-device) so nothing leaves the machine — the priority, since the hosted model is itself a data path. Acceptance bar: it must match the hosted model on the frozen sets and on a live allow-review slice before it ships, or fail-safe plus a miscalibrated local model just becomes deny-spam that pushes people back to passthrough.
 - [ ] **Multi-step composition**: bind a later call to earlier writes, or treat "run a file this session just created" as its own risk axis, to catch the write-a-helper-then-exec pattern a one-shot scorer misses.
 - [ ] A read-only fast path (`ls`, `cat`, `git status` … with no pipes or redirects) so the model is only consulted when something could change
 - [x] MCP proxy mode — gate any MCP client, not just Claude Code (0.7.0)
+
+Ranked for someone deciding whether to put real credentials in the agent's environment, per the second independent review: local backend (data must not leave the box), then multi-step composition (the miss class a single-call log cannot see), then the content-vs-action wording (what makes the ask rate livable), then the read-only fast path (what keeps the hook installed). Until the first two exist, "0 permissive misses" means "0 single-call misses in a short log."
 
 ## Threat model
 
@@ -187,7 +194,7 @@ Built by Jaz (Risk Averse Technology Company) with Claude (in Cowork), and harde
 
 ChatGPT (GPT-6 Astra High) ran seven rounds of product and correctness review and authored and prospectively labeled four challenge sets including the adversarial set 5. The "capability is not harm" critique behind v0.2.0, the per-axis floor in v0.3.2, the constraint and reserved-choice questions in v0.4.0, and the truncation bug that invalidated an evaluation in v0.4.1 are theirs.
 
-Grok (xAI) reviewed the security posture and drove v0.7.1: the fail-safe default (`fail_mode: ask`, since a firewall that allows when its checker is down is the state an attacker wants) and the allow-side audit review. The measurement standard below and the multi-step-composition roadmap item are its framing.
+Grok (xAI) reviewed the security posture and drove v0.7.1: the fail-safe default (`fail_mode: ask`, since a firewall that allows when its checker is down is the state an attacker wants) and the allow-side audit review. The measurement standard below and the multi-step-composition roadmap item are its framing. Its second review, of 0.9.0, drove 0.9.1: the attack on `trusted_tools` (name collision, forged names, a replaced binary, over-broad matchers) and the three guards that answer it; the order-statistic reading of the threshold band and the per-axis histograms; the "regression check, not a miss rate" framing of the 41-decision log and the bar for one that counts; and the ranking of what remains.
 
 Every finding is recorded in [CHANGELOG.md](CHANGELOG.md).
 

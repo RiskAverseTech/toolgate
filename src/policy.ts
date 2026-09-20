@@ -128,6 +128,9 @@ export const DEFAULT_RULES: StaticRule[] = [
   },
 ];
 
+/** Tool names from servers nobody would name; a trusted_tools matcher that hits one is too broad. */
+const TRUSTED_TOOLS_SENTINELS = ['mcp__toolgate_sentinel_a__any_tool', 'mcp__toolgate_sentinel_b__x', 'ToolgateSentinelTool'];
+
 export function defaultPolicy(): Policy {
   return {
     backend: { provider: 'auto', model: 'auto', timeout_ms: 5000 },
@@ -221,7 +224,14 @@ export function validatePolicy(p: Policy): void {
     if (!h || /\s/.test(h) || h.includes('://') || h.includes('/')) fail(`trusted_hosts entry "${h}" must be a bare hostname (e.g. api.acme.com), not a URL or path`);
   }
   if (typeof p.trusted_tools !== 'string') fail('trusted_tools must be a tool matcher string or a list of tool names');
-  if (p.trusted_tools) toolMatcherToRegex(p.trusted_tools);
+  if (p.trusted_tools) {
+    const re = toolMatcherToRegex(p.trusted_tools);
+    // A matcher that would trust a tool from a server you never named is an exfiltration
+    // allow-list for every MCP server you ever add. Name the client-assigned server key.
+    if (TRUSTED_TOOLS_SENTINELS.some((s) => re.test(s))) {
+      fail(`trusted_tools "${p.trusted_tools}" is too broad: it would trust tools from any MCP server. Name the server key, e.g. mcp__myapi__.*`);
+    }
+  }
   if (typeof p.include_task_context !== 'boolean') fail('include_task_context must be true or false');
   if (typeof p.show_allows !== 'boolean') fail('show_allows must be true or false');
   for (const k of ['input_chars', 'task_chars', 'earlier_prompts'] as const) {

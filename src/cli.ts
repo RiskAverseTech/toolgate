@@ -22,10 +22,14 @@ Usage:
       --task supplies user prompts (repeatable, oldest first; the last is the current task)
       so the context questions are asked.
 
-  toolgate mcp [--gate <regex>] [--on-ask block|allow] [--backend ...] -- <server-cmd> [args...]
+  toolgate mcp [--gate <regex>] [--on-ask block|allow] [--trusted] [--backend ...] -- <server-cmd> [args...]
       Sit between an MCP client and one downstream MCP server, gating every tools/call.
       Allow forwards it; deny (and ask, by default) returns a tool error with the reason.
       Supply a task with TOOLGATE_TASK or ~/.toolgate/task so the context questions apply.
+      --trusted: "I launched this server and accept its destinations" — its advertised tools
+      are treated as your own service (exfiltration axis only; everything else gated as usual).
+      Trust, from --trusted or the policy's trusted_tools, is only applied to names the server
+      actually advertised in tools/list; a call merely claiming a trusted name gets none.
 
   toolgate init [--print]
       Write ~/.toolgate/toolgate.yaml, save the API key for hooks, make one real test decision,
@@ -81,6 +85,7 @@ async function main(): Promise<void> {
       print: { type: 'boolean' },
       gate: { type: 'string' },
       'on-ask': { type: 'string' },
+      trusted: { type: 'boolean' },
       help: { type: 'boolean', short: 'h' },
     },
   });
@@ -96,6 +101,7 @@ async function main(): Promise<void> {
     print: values.print === true,
     gate: str(values.gate),
     onAsk: str(values['on-ask']),
+    trusted: values.trusted === true,
     help: values.help === true,
   };
   const cmd = positionals[0] ?? 'hook';
@@ -130,7 +136,10 @@ async function main(): Promise<void> {
 
     case 'mcp': {
       if (args.onAsk !== undefined && args.onAsk !== 'block' && args.onAsk !== 'allow') throw new Error('--on-ask must be block or allow');
-      return runMcp({ policyPath: args.policy, backend: args.backend, gate: args.gate, onAsk: args.onAsk as 'block' | 'allow' | undefined }, afterDoubleDash);
+      return runMcp(
+        { policyPath: args.policy, backend: args.backend, gate: args.gate, onAsk: args.onAsk as 'block' | 'allow' | undefined, trusted: args.trusted },
+        afterDoubleDash,
+      );
     }
 
     case 'init': {
@@ -305,6 +314,44 @@ function printStats(lines: string[]): void {
   if (allows.length) {
     console.log(`\nclosest allows (review — should contain nothing that ought to have been stopped):`);
     for (const r of allows.slice(0, 8)) console.log(`  ${(maxRisk(r) * 100).toFixed(0).padStart(3)}%  ${String(r.tool).padEnd(8)} ${String(r.input ?? '').slice(0, 74)}`);
+  }
+  printAxisHistograms(modelRows, allows);
+}
+
+/**
+ * Per-axis distribution, because the verdict is a max over axes: the max of seven noisy scores
+ * sits closer to the ask line than any one of them (order-statistic bias), so "29% of allows in
+ * the band" is expected. What matters is WHICH axis owns the band. One axis → a wording or
+ * trusted_* problem; all of them smeared → the model is poorly separated and no threshold saves it.
+ */
+function printAxisHistograms(modelRows: Array<Record<string, unknown>>, allows: Array<Record<string, unknown>>): void {
+  const BUCKETS: Array<[string, number, number]> = [['<.20', 0, 0.2], ['.20–.39', 0.2, 0.4], ['.40–.54', 0.4, 0.55], ['.55–.84', 0.55, 0.85], ['≥.85', 0.85, 1.01]];
+  const axes = new Map<string, number[]>();
+  for (const r of modelRows) {
+    const p = r.probabilities as Record<string, number> | undefined;
+    if (!p) continue;
+    for (const [k, v] of Object.entries(p)) {
+      if (k === 'authorized' || typeof v !== 'number') continue;
+      axes.set(k, [...(axes.get(k) ?? []), v]);
+    }
+  }
+  if (axes.size === 0) return;
+  console.log(`\nper-axis scores (${modelRows.length} model decisions):`);
+  console.log(`  ${'axis'.padEnd(20)}${BUCKETS.map(([l]) => l.padStart(8)).join('')}`);
+  for (const [axis, vals] of [...axes.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    const counts = BUCKETS.map(([, lo, hi]) => vals.filter((v) => v >= lo && v < hi).length);
+    console.log(`  ${axis.padEnd(20)}${counts.map((c) => String(c).padStart(8)).join('')}`);
+  }
+  // Who owns the allow band just under the ask line?
+  const owner: Record<string, number> = {};
+  for (const r of allows) {
+    const p = r.probabilities as Record<string, number>;
+    const [k, v] = Object.entries(p).filter(([k]) => k !== 'authorized').sort((a, b) => b[1] - a[1])[0] ?? ['-', 0];
+    if (v >= 0.4 && v < 0.55) owner[k] = (owner[k] ?? 0) + 1;
+  }
+  const band = Object.values(owner).reduce((a, b) => a + b, 0);
+  if (band) {
+    console.log(`allows in the .40–.54 band: ${band}/${allows.length}, top axis: ${Object.entries(owner).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(', ')}`);
   }
 }
 

@@ -25,10 +25,11 @@ function taskSummary(d: Decision, logText: boolean): Record<string, unknown> | u
   };
 }
 /** Append one JSONL line per decision. Owner-only file; secrets redacted; never throws. */
-export function writeAudit(policy: Policy, input: HookInput, decision: Decision, backend: string): void {
+export function writeAudit(policy: Policy, input: HookInput, decision: Decision, backend: string, extra: Record<string, unknown> = {}): void {
   if (!policy.audit.enabled) return;
   try {
     const entry = {
+      ...extra, // transport-specific fields (e.g. mcp_server, trusted_tool) — never override the core ones below
       ts: new Date().toISOString(),
       session_id: input.session_id,
       agent_type: input.agent_type,

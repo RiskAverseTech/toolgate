@@ -116,6 +116,15 @@ describe('policy loading', () => {
     it('rejects an invalid regex matcher', () => {
       expect(() => loadPolicy(tmpPolicy('trusted_tools: "mcp__(oops"\n'))).toThrow();
     });
+
+    it.each(['mcp__.*', '.*', '*', 'mcp__.*__.*'])('rejects an over-broad matcher that would trust any server: %s', (m) => {
+      expect(() => loadPolicy(tmpPolicy(`trusted_tools: "${m}"\n`))).toThrow(/too broad/);
+    });
+
+    it('accepts a matcher that names the server key', () => {
+      expect(loadPolicy(tmpPolicy('trusted_tools: "mcp__myapi__.*"\n')).trusted_tools).toBe('mcp__myapi__.*');
+      expect(loadPolicy(tmpPolicy('trusted_tools: [mcp__myapi__a, mcp__other__b]\n')).trusted_tools).toBe('mcp__myapi__a|mcp__other__b');
+    });
   });
 
   it('an empty key falls back to the default instead of crashing', () => {

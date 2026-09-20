@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import type { Decision, DecisionBackend, HookInput, Policy } from './types.js';
 import { decide, message } from './engine.js';
 import { makeBackend } from './hook.js';
-import { loadEnvFile, loadPolicy } from './policy.js';
+import { loadEnvFile, loadPolicy, toolMatcherToRegex } from './policy.js';
 import { writeAudit } from './audit.js';
 
 /**
@@ -31,6 +31,12 @@ export interface McpOptions {
   gate?: string;
   /** What an `ask` verdict does when no human is at the call: 'block' (default) or 'allow'. */
   onAsk?: 'block' | 'allow';
+  /**
+   * Trust every tool this downstream server advertises, as if each were in `trusted_tools`:
+   * "I launched this server and accept its destinations." Bound to this child process, so it
+   * never leaks to other servers. Only relaxes the exfiltration axis; everything else is gated as usual.
+   */
+  trusted?: boolean;
 }
 
 interface JsonRpcMessage {
@@ -108,6 +114,77 @@ function taskTranscript(task: string | undefined): string | undefined {
   return path;
 }
 
+/**
+ * The tool names the downstream server actually advertised in its `tools/list` responses.
+ * Trust (`trusted_tools` or `--trusted`) is only ever applied to these: a `tools/call` that merely
+ * claims a trusted name, without the server having declared it, gets no relaxation.
+ */
+export class AdvertisedTools {
+  private readonly pending = new Set<string | number>();
+  private readonly names = new Set<string>();
+  private waiters: Array<() => void> = [];
+
+  /** Client → server: remember a tools/list request id so its response can be recognized. */
+  noteRequest(m: JsonRpcMessage | undefined): void {
+    if (m && m.method === 'tools/list' && m.id !== undefined && m.id !== null) this.pending.add(m.id);
+  }
+
+  /** Server → client: harvest tool names from a tools/list response (an error reply just settles it). */
+  noteResponse(m: JsonRpcMessage | undefined): void {
+    if (!m || m.id === undefined || m.id === null || !this.pending.has(m.id)) return;
+    this.pending.delete(m.id);
+    const tools = (m.result as { tools?: unknown } | undefined)?.tools;
+    if (Array.isArray(tools)) {
+      for (const t of tools) {
+        const name = (t as { name?: unknown } | null)?.name;
+        if (typeof name === 'string') this.names.add(name);
+      }
+    }
+    if (this.pending.size === 0) {
+      const w = this.waiters;
+      this.waiters = [];
+      for (const f of w) f();
+    }
+  }
+
+  /**
+   * Resolves once no tools/list request is in flight, so a tools/call pipelined right behind the
+   * list is judged against the answered list rather than an empty one. Bounded: a server that
+   * never answers just gets no trust, which is the safe direction.
+   */
+  settled(timeoutMs = 2000): Promise<void> {
+    if (this.pending.size === 0) return Promise.resolve();
+    return new Promise((resolve) => {
+      const t = setTimeout(resolve, timeoutMs);
+      this.waiters.push(() => {
+        clearTimeout(t);
+        resolve();
+      });
+    });
+  }
+
+  has(name: string): boolean {
+    return this.names.has(name);
+  }
+
+  get size(): number {
+    return this.names.size;
+  }
+}
+
+/**
+ * Whether to tell the model this tool is the user's own service. Requires BOTH a claim (the
+ * policy's `trusted_tools` matcher or `--trusted`) AND the server having advertised the name.
+ */
+export function trustDecision(name: string, claimed: boolean, advertised: AdvertisedTools): { trusted: boolean; reason?: string } {
+  if (!claimed) return { trusted: false };
+  if (advertised.has(name)) return { trusted: true };
+  return {
+    trusted: false,
+    reason: advertised.size === 0 ? 'the downstream server has not answered tools/list yet' : 'the downstream server did not advertise it in tools/list',
+  };
+}
+
 /** Split newline-delimited messages, keeping any partial trailing line in a buffer. */
 export function createFramer(onMessage: (line: string) => void): (chunk: Buffer) => void {
   let buffer = '';
@@ -132,6 +209,10 @@ export async function runMcp(opts: McpOptions, command: string[]): Promise<void>
   const backend = makeBackend(policy, opts.backend);
   const onAsk = opts.onAsk ?? 'block';
   const transcriptPath = taskTranscript(readTask());
+  // Trust is a claim (policy matcher or --trusted) bound to what THIS server advertises.
+  const trustMatcher = policy.trusted_tools ? toolMatcherToRegex(policy.trusted_tools) : undefined;
+  const advertised = new AdvertisedTools();
+  const serverLabel = command.join(' ');
 
   const [cmd, ...args] = command;
   const child = spawn(cmd!, args, { stdio: ['pipe', 'pipe', 'inherit'] });
@@ -144,22 +225,46 @@ export async function runMcp(opts: McpOptions, command: string[]): Promise<void>
   const toClient = (m: JsonRpcMessage): void => void process.stdout.write(JSON.stringify(m) + '\n');
   const toServer = (line: string): void => void child.stdin!.write(line + '\n');
 
-  // server → client: always forwarded untouched.
-  child.stdout!.on('data', createFramer((line) => process.stdout.write(line + '\n')));
+  // server → client: always forwarded untouched; tools/list answers are read on the way past.
+  child.stdout!.on('data', createFramer((line) => {
+    advertised.noteResponse(parseMessage(line));
+    process.stdout.write(line + '\n');
+  }));
+
+  // Don't close the server's stdin while gated calls are still being decided: drain first.
+  let inFlight = 0;
+  let clientEnded = false;
+  const maybeEndChild = (): void => {
+    if (clientEnded && inFlight === 0) child.stdin!.end();
+  };
 
   // client → server: forward everything except a tools/call, which is gated first.
   const onClientLine = (line: string): void => {
     const m = parseMessage(line);
+    advertised.noteRequest(m);
     if (!isToolCall(m)) {
       toServer(line);
       return;
     }
+    inFlight++;
     const input: HookInput = { tool_name: m.params.name, tool_input: m.params.arguments ?? {}, cwd: process.cwd() };
     if (transcriptPath) input.transcript_path = transcriptPath;
-    // Gate asynchronously so other traffic is never blocked behind a model call.
-    void decide(input, policy, backend)
+    const claimed = opts.trusted === true || (trustMatcher?.test(m.params.name) ?? false);
+    // Gate asynchronously so other traffic is never blocked behind a model call. If a tools/list
+    // is still in flight, wait for it (bounded) so trust is judged against what the server said.
+    let trusted = false;
+    void advertised
+      .settled()
+      .then(() => {
+        const trust = trustDecision(m.params.name, claimed, advertised);
+        trusted = trust.trusted;
+        if (claimed && !trust.trusted) process.stderr.write(`toolgate mcp: trust not applied to ${m.params.name}: ${trust.reason}\n`);
+        return decide(input, policy, backend, { trustedTool: trust.trusted });
+      })
       .then((decision) => {
-        if (decision.source !== 'no-opinion') writeAudit(policy, input, decision, backend.name);
+        if (decision.source !== 'no-opinion') {
+          writeAudit(policy, input, decision, backend.name, { mcp_server: serverLabel, trusted_tool: trusted || undefined });
+        }
         const action = actOnDecision(m.id, decision, onAsk);
         if (action.forward) toServer(line);
         else {
@@ -172,8 +277,15 @@ export async function runMcp(opts: McpOptions, command: string[]): Promise<void>
         const decision: Decision = { verdict: 'ask', reason: `internal error (${message(err)}) — not forwarded`, source: 'fail-mode' };
         toClient(blockedResult(m.id, decision));
         process.stderr.write(`toolgate mcp: ${decision.reason}\n`);
+      })
+      .finally(() => {
+        inFlight--;
+        maybeEndChild();
       });
   };
   process.stdin.on('data', createFramer(onClientLine));
-  process.stdin.on('end', () => child.stdin!.end());
+  process.stdin.on('end', () => {
+    clientEnded = true;
+    maybeEndChild();
+  });
 }
