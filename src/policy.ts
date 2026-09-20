@@ -135,6 +135,7 @@ export function defaultPolicy(): Policy {
     thresholds: { deny: 0.85, ask: 0.55, authorized: 0.8 },
     rules: [...DEFAULT_RULES],
     gated_tools: 'Bash|Write|Edit|MultiEdit|NotebookEdit|WebFetch|WebSearch|mcp__.*',
+    trusted_hosts: [],
     include_task_context: true,
     show_allows: false,
     limits: { input_chars: 20000, task_chars: 6000, earlier_prompts: 2 },
@@ -186,6 +187,9 @@ function mergePolicy(base: Policy, user: Record<string, unknown>): Policy {
     // User rules run first (higher priority); built-ins stay as the floor.
     rules: [...(Array.isArray(user.rules) ? (user.rules as StaticRule[]) : []), ...base.rules],
     gated_tools: (user.gated_tools as string) ?? base.gated_tools,
+    // A list replaces, it does not merge: the user states the full set of trusted destinations.
+    // A single host may be written as a scalar (`trusted_hosts: api.acme.com`).
+    trusted_hosts: normalizeHosts(user.trusted_hosts, base.trusted_hosts),
     include_task_context: (user.include_task_context as boolean) ?? base.include_task_context,
     show_allows: (user.show_allows as boolean) ?? base.show_allows,
     limits: { ...base.limits, ...obj(user.limits) },
@@ -209,6 +213,10 @@ export function validatePolicy(p: Policy): void {
   if (!(ask >= 0 && ask <= deny && deny <= 1)) fail('thresholds must satisfy 0 <= ask <= deny <= 1');
   if (!(authorized >= 0 && authorized <= 1)) fail('thresholds.authorized must be in [0, 1]');
   if (typeof p.gated_tools !== 'string' || !p.gated_tools) fail('gated_tools must be a non-empty string');
+  if (!Array.isArray(p.trusted_hosts) || !p.trusted_hosts.every((h) => typeof h === 'string')) fail('trusted_hosts must be a list of strings');
+  for (const h of p.trusted_hosts) {
+    if (!h || /\s/.test(h) || h.includes('://') || h.includes('/')) fail(`trusted_hosts entry "${h}" must be a bare hostname (e.g. api.acme.com), not a URL or path`);
+  }
   if (typeof p.include_task_context !== 'boolean') fail('include_task_context must be true or false');
   if (typeof p.show_allows !== 'boolean') fail('show_allows must be true or false');
   for (const k of ['input_chars', 'task_chars', 'earlier_prompts'] as const) {
@@ -251,4 +259,11 @@ export function expandTilde(p: string): string {
 
 function obj(v: unknown): Record<string, unknown> {
   return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+}
+
+/** trusted_hosts as a trimmed string list; a single host may be given as a scalar. Empty/other falls back. */
+function normalizeHosts(v: unknown, fallback: string[]): string[] {
+  if (Array.isArray(v)) return v.map((h) => String(h).trim()).filter(Boolean);
+  if (typeof v === 'string') return v.trim() ? [v.trim()] : fallback;
+  return fallback;
 }

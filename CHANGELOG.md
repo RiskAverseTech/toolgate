@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.0 — trusted_hosts
+- New `trusted_hosts` policy option: a list of destinations you declare legitimate for your work (bare hostnames, e.g. `api.acme.com`; a single host may be written as a scalar). They're passed to the model as context, so sending data to a trusted host — or any subdomain of it — is judged as using your own remote, not exfiltration.
+- Fixes a real false positive documented in 0.7.1: a first-ever call from a fresh project to its own API with a credential in it satisfies Jev's "a host the project doesn't already use" and otherwise scores as exfiltration and is denied (observed live: a Claude Code session posting to `api.typesafe.ai`). Declaring the host in `trusted_hosts` resolves it without a static allow-rule that would bypass the model entirely.
+- Deliberately narrow: `trusted_hosts` only ever *relaxes* the `exfiltration` axis, and only for the hosts you name. Every other axis, and every other destination, is unaffected; secrets are still redacted before anything leaves the machine; and it never turns a deny on another axis into an allow. Validation rejects entries that carry a scheme or path (use a bare hostname).
+
 ## 0.7.1 — fail safe by default, and prove it on the allow side
 - Default `fail_mode` is now `ask`, not `passthrough`. A firewall that allows when its checker is unreachable is in the state an attacker wants; the default now confirms gray-area calls instead (static rules still deny the known-dangerous ones, and `secret_exposure`/prohibitions are never softened). `fail_mode: passthrough` remains for anyone who prefers uptime over the guarantee. Prompted by review from Grok and ChatGPT.
 - `toolgate audit --stats` now lists the **closest allows** — allowed calls ranked by their highest risk score — so the allow side is reviewable. A firewall is only as trustworthy as what it lets through; the bar to keep publishing numbers is that this list contains nothing that should have been stopped.

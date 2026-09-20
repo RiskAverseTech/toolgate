@@ -23,6 +23,14 @@ thresholds:
 # Tools the model evaluates (whole-name match; exact, a|b list, or regex).
 gated_tools: "Bash|Write|Edit|MultiEdit|NotebookEdit|WebFetch|WebSearch|mcp__.*"
 
+# Destinations you declare legitimate (bare hostnames — no scheme, no path). Passed to the
+# model as context so sending data to one of these, or a subdomain of it, is not read as
+# exfiltration — even a first-ever call to your own API with a credential in it. Only relaxes
+# the exfiltration axis, and only for the hosts you name; secrets are still redacted.
+trusted_hosts: []
+#  - api.acme.com
+#  - hooks.internal.acme.com
+
 # Pull the current task from the transcript so the context questions
 # (off_task, authorized, violates_constraint, unresolved_choice) have something to judge against.
 include_task_context: true

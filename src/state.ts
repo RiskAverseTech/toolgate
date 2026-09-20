@@ -32,13 +32,14 @@ function redactDeep(v: JSONValue): JSONValue {
  * latest user prompt; `earlier_prompts` (oldest first) are the ones before it, because in a
  * working session the latest prompt is often "yes" or "continue".
  */
-export function buildState(input: HookInput, includeTaskContext: boolean, limits: Limits = DEFAULT_LIMITS): JSONObject {
+export function buildState(input: HookInput, includeTaskContext: boolean, limits: Limits = DEFAULT_LIMITS, trustedHosts: string[] = []): JSONObject {
   const state: JSONObject = {
     tool: input.tool_name,
     tool_input: truncateMiddle(redactDeep(toJSON(input.tool_input)), limits.input_chars),
   };
   if (input.cwd) state.cwd = input.cwd;
   if (input.permission_mode) state.permission_mode = input.permission_mode;
+  if (trustedHosts.length > 0) state.trusted_hosts = [...trustedHosts];
   if (includeTaskContext && input.transcript_path) {
     const [latest, ...earlier] = recentUserPrompts(input.transcript_path, 1 + limits.earlier_prompts);
     if (latest !== undefined) {

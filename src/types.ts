@@ -76,6 +76,12 @@ export interface Policy {
   rules: StaticRule[];
   /** Tools the model evaluates (whole-name matcher). Others pass through untouched. */
   gated_tools: string;
+  /**
+   * Destinations you declare legitimate for this project (hostnames, e.g. `api.acme.com`).
+   * Passed to the model as context: sending data to a trusted host (or a subdomain of it) is
+   * not exfiltration, even on a first-ever call with a credential in it. Empty by default.
+   */
+  trusted_hosts: string[];
   /** Read the current task from the transcript so `off_task` has context. */
   include_task_context: boolean;
   /** Show a "[toolgate] all risks below …" line on allowed calls too. Off by default: asks and denies are always shown. */

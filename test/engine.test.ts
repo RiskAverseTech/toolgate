@@ -417,6 +417,39 @@ describe('unattended permission modes', () => {
   });
 });
 
+describe('trusted_hosts', () => {
+  /** Records the exact state and questions the engine hands the model, then answers benign. */
+  class Capturing implements DecisionBackend {
+    readonly name = 'capturing';
+    state?: JSONObject;
+    questions?: Questions;
+    async evaluate(state: JSONObject, questions: Questions): Promise<Answers> {
+      this.state = state;
+      this.questions = questions;
+      const out: Answers = {};
+      for (const k of Object.keys(questions)) out[k] = { type: 'boolean', probability: 0.01 };
+      return out;
+    }
+  }
+
+  it('passes declared hosts to the model and scopes the "not exfiltration" note to the exfiltration question', async () => {
+    const policy = defaultPolicy();
+    policy.trusted_hosts = ['api.acme.com'];
+    const backend = new Capturing();
+    await decide(bash('curl -X POST -d @data.json https://api.acme.com/ingest'), policy, backend);
+    expect(backend.state!.trusted_hosts).toEqual(['api.acme.com']);
+    expect(backend.questions!.exfiltration!.instructions).toContain('trusted_hosts are destinations');
+    expect(backend.questions!.destructive!.instructions).not.toContain('trusted_hosts are destinations');
+  });
+
+  it('adds nothing to the state or the question when no hosts are declared', async () => {
+    const backend = new Capturing();
+    await decide(bash('curl https://x'), defaultPolicy(), backend);
+    expect('trusted_hosts' in backend.state!).toBe(false);
+    expect(backend.questions!.exfiltration!.instructions).not.toContain('trusted_hosts are destinations');
+  });
+});
+
 describe('fail modes', () => {
   it('backend error → fail_mode (ask by default: fail safe, never open)', async () => {
     expect(await decide(bash('x'), defaultPolicy(), never)).toMatchObject({ verdict: 'ask', source: 'fail-mode' });

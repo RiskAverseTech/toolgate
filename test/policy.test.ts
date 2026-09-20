@@ -58,6 +58,8 @@ describe('policy loading', () => {
     ['tiny input limit', 'limits:\n  input_chars: 10\n'],
     ['bad unattended.ask', 'unattended:\n  ask: allow\n'],
     ['bad unattended.modes', 'unattended:\n  modes: auto\n'],
+    ['trusted_hosts with a scheme', 'trusted_hosts:\n  - https://api.acme.com\n'],
+    ['trusted_hosts with a path', 'trusted_hosts:\n  - api.acme.com/ingest\n'],
   ])('rejects invalid policy: %s', (_name, yaml) => {
     expect(() => loadPolicy(tmpPolicy(yaml))).toThrow();
   });
@@ -71,6 +73,25 @@ describe('policy loading', () => {
   it('show_allows defaults off and can be turned on', () => {
     expect(defaultPolicy().show_allows).toBe(false);
     expect(loadPolicy(tmpPolicy('show_allows: true\n')).show_allows).toBe(true);
+  });
+
+  describe('trusted_hosts', () => {
+    it('defaults to an empty list', () => {
+      expect(defaultPolicy().trusted_hosts).toEqual([]);
+    });
+
+    it('a user list replaces the default and is trimmed', () => {
+      const p = loadPolicy(tmpPolicy('trusted_hosts:\n  - api.acme.com\n  - " hooks.internal "\n'));
+      expect(p.trusted_hosts).toEqual(['api.acme.com', 'hooks.internal']);
+    });
+
+    it('accepts a single host written as a scalar', () => {
+      expect(loadPolicy(tmpPolicy('trusted_hosts: api.acme.com\n')).trusted_hosts).toEqual(['api.acme.com']);
+    });
+
+    it('an empty value falls back to the default', () => {
+      expect(loadPolicy(tmpPolicy('trusted_hosts:\n')).trusted_hosts).toEqual([]);
+    });
   });
 
   it('an empty key falls back to the default instead of crashing', () => {

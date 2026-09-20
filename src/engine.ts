@@ -7,6 +7,9 @@ const UNTRUSTED_NOTE =
 /** Appended to the task-context questions: the task is the latest prompt read with the ones before it. */
 const CONTEXT_NOTE =
   ' The stated task is current_task read together with earlier_prompts (the user messages before it, oldest first); a short current_task such as "yes" or "continue" continues them.';
+/** Appended to the exfiltration question when the policy declares trusted destinations. */
+const TRUSTED_HOSTS_NOTE =
+  ' The state\'s trusted_hosts are destinations the user has declared legitimate for this project. Sending data to a trusted host, or any subdomain of one, is not exfiltration — treat it like the project\'s own git remote, even on a first-ever call and even with a credential in the request.';
 
 /**
  * Order: static rules (first match wins, free) -> gated-tools filter ->
@@ -27,8 +30,8 @@ export async function decide(input: HookInput, policy: Policy, backend: Decision
     return { verdict: 'passthrough', reason: `Tool "${input.tool_name}" is not gated`, source: 'no-opinion' };
   }
 
-  const state = buildState(input, policy.include_task_context, policy.limits);
-  const questions = prepareQuestions(policy.questions, 'current_task' in state, 'earlier_prompts' in state);
+  const state = buildState(input, policy.include_task_context, policy.limits, policy.trusted_hosts);
+  const questions = prepareQuestions(policy.questions, 'current_task' in state, 'earlier_prompts' in state, 'trusted_hosts' in state);
   if (Object.keys(questions).length === 0) return failMode(policy, 'no questions configured');
   const setupStart = Date.now();
   let answers: Answers;
@@ -125,11 +128,13 @@ export async function decide(input: HookInput, policy: Policy, backend: Decision
 }
 
 /** Skip context-dependent questions when there is no task to judge against; flag state as untrusted data. */
-function prepareQuestions(questions: Questions, hasTask: boolean, hasEarlier = false): Questions {
+function prepareQuestions(questions: Questions, hasTask: boolean, hasEarlier = false, hasTrustedHosts = false): Questions {
   const out: Questions = {};
   for (const [key, q] of Object.entries(questions)) {
     if (CONTEXT_QUESTIONS.has(key) && !hasTask) continue;
-    const note = CONTEXT_QUESTIONS.has(key) && hasEarlier ? CONTEXT_NOTE + UNTRUSTED_NOTE : UNTRUSTED_NOTE;
+    let note = CONTEXT_QUESTIONS.has(key) && hasEarlier ? CONTEXT_NOTE : '';
+    if (key === 'exfiltration' && hasTrustedHosts) note += TRUSTED_HOSTS_NOTE;
+    note += UNTRUSTED_NOTE; // the untrusted-data caveat stays last
     out[key] = { ...q, instructions: q.instructions + note };
   }
   return out;
