@@ -1,4 +1,4 @@
-import type { Answers, Decision, DecisionBackend, HookInput, Policy, Questions } from './types.js';
+import type { Answers, Decision, DecisionBackend, HookInput, Policy, Questions, StaticRule } from './types.js';
 import { ASK_CEILING, CONTEXT_QUESTIONS, UNSOFTENABLE, toolMatcherToRegex } from './policy.js';
 import { buildState, isTruncated, matchText } from './state.js';
 
@@ -30,11 +30,21 @@ export interface DecideOptions {
 
 export async function decide(input: HookInput, policy: Policy, backend: DecisionBackend, opts: DecideOptions = {}): Promise<Decision> {
   const text = matchText(input.tool_input);
-  for (const [i, rule] of policy.rules.entries()) {
+  // Static rules, first match wins, in this order: built-in DENIES (the floor a user rule can
+  // never lower), then the user's rules, then the remaining built-ins (asks a user rule may
+  // deliberately override, e.g. allowing one specific installer's `curl | sh`).
+  const builtinDenies = policy.rules.filter((r) => r.action === 'deny');
+  const builtinRest = policy.rules.filter((r) => r.action !== 'deny');
+  const ordered: Array<[StaticRule, string]> = [
+    ...builtinDenies.map((r): [StaticRule, string] => [r, 'built-in']),
+    ...policy.user_rules.map((r, i): [StaticRule, string] => [r, `#${i + 1}`]),
+    ...builtinRest.map((r): [StaticRule, string] => [r, 'built-in']),
+  ];
+  for (const [rule, label] of ordered) {
     const toolOk = rule.match.tool === undefined || toolMatcherToRegex(rule.match.tool).test(input.tool_name);
     const inputOk = rule.match.input_regex === undefined || new RegExp(rule.match.input_regex, 'i').test(text);
     if (toolOk && inputOk) {
-      return { verdict: rule.action, reason: rule.reason ?? `Matched static rule #${i + 1}`, source: 'static-rule' };
+      return { verdict: rule.action, reason: rule.reason ?? `Matched static rule ${label}`, source: 'static-rule' };
     }
   }
 

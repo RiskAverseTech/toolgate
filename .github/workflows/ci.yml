@@ -27,3 +27,17 @@ jobs:
       - run: npm run build
       # The hook end-to-end and self-test cases run the built dist/cli.js, so build must precede test.
       - run: npm test
+
+  package-smoke:
+    runs-on: ubuntu-latest
+    name: package smoke (what users receive)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # Builds the real npm tarball, installs it into a scratch project, and exercises the shipped
+      # features through the installed bin. Catches a stale dist/ (0.8.0 and 0.9.0 shipped one).
+      - run: npm run smoke

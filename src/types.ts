@@ -72,8 +72,10 @@ export interface Policy {
   fail_mode: 'passthrough' | 'ask' | 'deny';
   /** authorized: P(task calls for this action) at/above which risk is softened one step. */
   thresholds: { deny: number; ask: number; authorized: number };
-  /** Static rules run first, in order; first match wins. User rules precede the built-ins. */
+  /** Built-in static rules (the floor). Evaluation order: built-in denies, then `user_rules`, then the remaining built-ins. */
   rules: StaticRule[];
+  /** Rules from the policy file. They can override a built-in `ask`, never a built-in `deny`. */
+  user_rules: StaticRule[];
   /** Tools the model evaluates (whole-name matcher). Others pass through untouched. */
   gated_tools: string;
   /**

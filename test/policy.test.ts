@@ -25,10 +25,11 @@ describe('policy loading', () => {
     expect(p.audit.path).toMatch(/custom\/audit\.jsonl$/);
   });
 
-  it('user rules are prepended; built-in rules survive', () => {
+  it('user rules are kept apart from the built-ins, which survive untouched', () => {
     const p = loadPolicy(tmpPolicy("rules:\n  - match: { tool: Bash, input_regex: 'terraform\\s+destroy' }\n    action: ask\n"));
-    expect(p.rules).toHaveLength(DEFAULT_RULES.length + 1);
-    expect(p.rules[0]?.match.input_regex).toContain('terraform');
+    expect(p.rules).toHaveLength(DEFAULT_RULES.length);
+    expect(p.user_rules).toHaveLength(1);
+    expect(p.user_rules[0]?.match.input_regex).toContain('terraform');
   });
 
   it('user questions are merged over built-ins', () => {

@@ -1,10 +1,19 @@
-import { appendFileSync, chmodSync, mkdirSync } from 'node:fs';
+import { appendFileSync, chmodSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { Decision, HookInput, Policy } from './types.js';
-import { matchText, redact } from './state.js';
+import { matchText, redactedInputText } from './state.js';
 
 const MAX_LOGGED_INPUT = 500;
 const MAX_LOGGED_TASK = 160;
+
+/** toolgate's own version, stamped on every audit line so a "single-version log" is verifiable from the log itself. */
+export const TOOLGATE_VERSION: string = (() => {
+  try {
+    return (JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version?: string }).version ?? 'unknown';
+  } catch {
+    return 'unknown';
+  }
+})();
 
 function truncatedInput(d: Decision): boolean {
   const t = d.state?.tool_input;
@@ -31,11 +40,13 @@ export function writeAudit(policy: Policy, input: HookInput, decision: Decision,
     const entry = {
       ...extra, // transport-specific fields (e.g. mcp_server, trusted_tool) — never override the core ones below
       ts: new Date().toISOString(),
+      toolgate_version: TOOLGATE_VERSION,
       session_id: input.session_id,
       agent_type: input.agent_type,
       permission_mode: input.permission_mode,
       tool: input.tool_name,
-      input: policy.audit.log_input ? redact(matchText(input.tool_input).slice(0, MAX_LOGGED_INPUT)) : undefined,
+      // Same redaction path as the model state (key-aware, then text patterns), then flattened and cut.
+      input: policy.audit.log_input ? redactedInputText(input.tool_input).slice(0, MAX_LOGGED_INPUT) : undefined,
       input_chars: matchText(input.tool_input).length,
       input_truncated: truncatedInput(decision) || undefined,
       // What the model was told the task was — the key to diagnosing off_task and authorized.

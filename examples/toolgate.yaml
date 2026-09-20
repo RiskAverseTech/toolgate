@@ -69,10 +69,11 @@ audit:
   path: ~/.toolgate/audit.jsonl
   log_input: true          # inputs are truncated and secrets redacted
 
-# Static rules run before the model — first match wins, costs nothing.
-# Rules you add here run BEFORE the built-ins (rm -rf / or ~ → deny;
-# curl | sh → ask; edits to agent safety settings → ask). Patterns match the
-# raw tool input values (quotes stripped), case-insensitively.
+# Static rules run before the model — first match wins, costs nothing. Order:
+# built-in DENIES first (rm -rf / or ~ — a rule here can never override those),
+# then your rules, then the remaining built-in asks (curl | sh; edits to agent
+# safety settings), which a rule here may deliberately override. Patterns match
+# the raw tool input values (quotes stripped), case-insensitively.
 rules: []
 #  - match: { tool: Bash, input_regex: 'terraform\s+destroy' }
 #    action: ask

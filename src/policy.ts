@@ -137,6 +137,7 @@ export function defaultPolicy(): Policy {
     fail_mode: 'ask',
     thresholds: { deny: 0.85, ask: 0.55, authorized: 0.8 },
     rules: [...DEFAULT_RULES],
+    user_rules: [],
     gated_tools: 'Bash|Write|Edit|MultiEdit|NotebookEdit|WebFetch|WebSearch|mcp__.*',
     trusted_hosts: [],
     trusted_tools: '',
@@ -188,8 +189,11 @@ function mergePolicy(base: Policy, user: Record<string, unknown>): Policy {
     backend: { ...base.backend, ...obj(user.backend) },
     fail_mode: (user.fail_mode as Policy['fail_mode']) ?? base.fail_mode,
     thresholds: { ...base.thresholds, ...obj(user.thresholds) },
-    // User rules run first (higher priority); built-ins stay as the floor.
-    rules: [...(Array.isArray(user.rules) ? (user.rules as StaticRule[]) : []), ...base.rules],
+    // Built-ins are the floor: kept separate so the engine can run built-in DENIES before any
+    // user rule (a broad user `allow` must not neutralize `rm -rf /`), then user rules, then the
+    // remaining built-in asks (which a user rule may deliberately override).
+    rules: [...base.rules],
+    user_rules: Array.isArray(user.rules) ? (user.rules as StaticRule[]) : [],
     gated_tools: (user.gated_tools as string) ?? base.gated_tools,
     // A list replaces, it does not merge: the user states the full set of trusted destinations.
     // A single host may be written as a scalar (`trusted_hosts: api.acme.com`).
@@ -241,7 +245,8 @@ export function validatePolicy(p: Policy): void {
   if (!Array.isArray(p.unattended.modes) || !p.unattended.modes.every((m) => typeof m === 'string')) fail('unattended.modes must be a list of strings');
   if (!['ask', 'deny'].includes(p.unattended.ask)) fail(`unattended.ask must be ask or deny, got "${String(p.unattended.ask)}"`);
   toolMatcherToRegex(p.gated_tools);
-  for (const [i, rule] of p.rules.entries()) {
+  if (!Array.isArray(p.user_rules)) fail('rules must be a list');
+  for (const [i, rule] of [...p.user_rules, ...p.rules].entries()) {
     if (!rule || typeof rule.match !== 'object' || rule.match === null) fail(`rule #${i + 1} needs a match block`);
     if (!['allow', 'ask', 'deny'].includes(rule.action)) fail(`rule #${i + 1} has invalid action "${String(rule.action)}"`);
     if (rule.match.input_regex !== undefined) new RegExp(rule.match.input_regex);

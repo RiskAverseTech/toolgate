@@ -14,16 +14,43 @@ const SECRET_PATTERNS: Array<[RegExp, string]> = [
   [/\b(?:gh[pousr]_|sk-|xox[baprs]-|AKIA)[A-Za-z0-9_-]{12,}/g, '[redacted]'],
 ];
 
-/** Scrub obvious secrets. Applied to everything that leaves the machine and to the audit log. */
+/**
+ * JSON keys whose values are secrets regardless of what the value looks like. Structured input
+ * (MCP arguments above all) separates the key from the value, so the text patterns above, which
+ * need `KEY=value` in one string, never see `{ "password": "hunter2" }`. Matched on the key's
+ * normalized form (lowercase, separators removed), so `api_key`, `apiKey`, `x-api-key`,
+ * `X_API_KEY` all match.
+ */
+const SENSITIVE_KEY =
+  /^(?:password|passwd|pwd|pass|secret|secretkey|clientsecret|token|accesstoken|refreshtoken|idtoken|bearertoken|authtoken|sessiontoken|apikey|xapikey|apisecret|authorization|auth|cookie|setcookie|credential|credentials|privatekey|passphrase|signingkey|encryptionkey|masterkey|dbpassword|connectionstring|dsn)$/;
+
+function isSensitiveKey(key: string): boolean {
+  return SENSITIVE_KEY.test(key.toLowerCase().replace(/[^a-z0-9]/g, ''));
+}
+
+/** Scrub obvious secrets in free text. Applied to everything that leaves the machine and to the audit log. */
 export function redact(text: string): string {
   return SECRET_PATTERNS.reduce((t, [re, sub]) => t.replace(re, sub), text);
 }
 
-function redactDeep(v: JSONValue): JSONValue {
+/**
+ * Scrub a JSON value: any scalar under a sensitive key is replaced outright; every string is
+ * additionally run through the text patterns. ONE redaction path: the model state and the audit
+ * log both use this, so there is a single transformation to reason about.
+ */
+export function redactInput(v: JSONValue, key?: string): JSONValue {
+  if (key !== undefined && isSensitiveKey(key) && (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean')) return '[redacted]';
   if (typeof v === 'string') return redact(v);
-  if (Array.isArray(v)) return v.map(redactDeep);
-  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, redactDeep(x)]));
+  if (Array.isArray(v)) return v.map((x) => redactInput(x));
+  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, redactInput(x, k)]));
   return v;
+}
+
+const redactDeep = redactInput;
+
+/** The tool input as redacted text, for the audit log: the same redaction the model state gets, then flattened. */
+export function redactedInputText(toolInput: unknown): string {
+  return matchText(redactInput(toJSON(toolInput)));
 }
 
 /**
