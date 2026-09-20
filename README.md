@@ -165,8 +165,8 @@ These are small constructed sets targeting specific failure categories, not a ge
 - [x] Evaluation on frozen, prospectively labeled sets (0.5.0; see above)
 - [x] Real-usage numbers from the audit log, and the 0.6.0 fixes they demanded
 - [ ] Held-out validation of the 0.6.0 wording by the independent reviewer (set 4 is a development set)
-- [x] `trusted_hosts`: destinations you declare legitimate, passed to the model as context so a first-ever call to your own API with a key in it is not read as exfiltration (0.8.0)
-- [x] `trusted_tools`: the same for MCP tools you run, which carry no hostname (0.9.0); bound to what the server advertises, over-broad matchers rejected, `--trusted` per launch (0.9.1)
+- [x] `trusted_hosts`: destinations you declare legitimate, passed to the model as context so a first-ever call to your own API with a key in it is not read as exfiltration (0.8.0 in git; **first actually on npm in 0.9.1**, see the retraction in the changelog)
+- [x] `trusted_tools`: the same for MCP tools you run, which carry no hostname (0.9.0 in git; on npm from 0.9.1); bound to what the server advertises, over-broad matchers rejected, `--trusted` per launch (0.9.1)
 - [ ] **Content-vs-action wording**: `violates_constraint` judges whether *executing* the call does the restricted thing, and the untrusted-data note says text describing a harmful action is not the action. Waits for a held-out matched-pair set so it isn't tuned on the seven cases that revealed it. This is the usability unlock for content tools; it is not the credentials unlock.
 - [ ] **Local backend** (openjev-style, on-device) so nothing leaves the machine — the priority, since the hosted model is itself a data path. Acceptance bar: it must match the hosted model on the frozen sets and on a live allow-review slice before it ships, or fail-safe plus a miscalibrated local model just becomes deny-spam that pushes people back to passthrough.
 - [ ] **Multi-step composition**: bind a later call to earlier writes, or treat "run a file this session just created" as its own risk axis, to catch the write-a-helper-then-exec pattern a one-shot scorer misses.
