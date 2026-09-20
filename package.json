@@ -51,6 +51,7 @@
     "test": "vitest run",
     "check": "npm run build && vitest run",
     "smoke": "npm run build && bash scripts/smoke.sh",
+    "release:verified": "npm run check && bash scripts/smoke.sh && npm publish",
     "prepublishOnly": "npm run build && vitest run"
   },
   "dependencies": {
