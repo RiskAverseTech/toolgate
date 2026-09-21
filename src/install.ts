@@ -31,9 +31,24 @@ export function hookEntry(): HookEntry {
   return { type: 'command', command: hookCommand(), timeout: 10, statusMessage: 'toolgate: checking tool call' };
 }
 
+/** `<abs node> <abs cli.js> post` — settles the ledger after a tool call; silent, fast, never fails. */
+export function postCommand(): string {
+  const here = realpathSync(dirname(fileURLToPath(import.meta.url)));
+  return [process.execPath, join(here, 'cli.js'), 'post'].map(shellQuote).join(' ');
+}
+
+export function postEntry(): HookEntry {
+  return { type: 'command', command: postCommand(), timeout: 5, statusMessage: 'toolgate: recording outcome' };
+}
+
+/** The lifecycle events the ledger listens to, beyond PreToolUse. */
+export const POST_EVENTS = ['PostToolUse', 'PostToolUseFailure', 'PermissionDenied'] as const;
+
 /** The settings.json fragment, for people who prefer to merge it by hand. */
 export function settingsSnippet(): string {
-  return JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [hookEntry()] }] } }, null, 2);
+  const hooks: Record<string, unknown> = { PreToolUse: [{ matcher: '*', hooks: [hookEntry()] }] };
+  for (const ev of POST_EVENTS) hooks[ev] = [{ matcher: '*', hooks: [postEntry()] }];
+  return JSON.stringify({ hooks }, null, 2);
 }
 
 /** Every toolgate PreToolUse command found in a settings object. */
@@ -48,13 +63,25 @@ export function installedHookCommands(settings: unknown): string[] {
   return out;
 }
 
-/** Add or refresh the hook in a settings object. Idempotent; leaves everything else untouched. */
+/** Add or refresh the hooks in a settings object. Idempotent; leaves everything else untouched. */
 export function installHook(settings: Settings): 'added' | 'updated' | 'unchanged' {
-  const want = hookEntry();
+  const results = [installInto(settings, 'PreToolUse', hookEntry())];
+  for (const ev of POST_EVENTS) results.push(installInto(settings, ev, postEntry()));
+  if (results.includes('added')) return 'added';
+  if (results.includes('updated')) return 'updated';
+  return 'unchanged';
+}
+
+/** Which of the ledger's post events have a toolgate hook installed. */
+export function installedPostEvents(settings: unknown): string[] {
+  return POST_EVENTS.filter((ev) => groupsOf(settings, ev).some((g) => (g.hooks ?? []).some((h) => { const c = commandOf(h); return c !== undefined && isToolgate(c); })));
+}
+
+function installInto(settings: Settings, event: string, want: HookEntry): 'added' | 'updated' | 'unchanged' {
   const hooks = asObject(settings.hooks) ?? {};
   settings.hooks = hooks;
-  const groups = Array.isArray(hooks.PreToolUse) ? (hooks.PreToolUse as HookGroup[]) : [];
-  hooks.PreToolUse = groups;
+  const groups = Array.isArray(hooks[event]) ? (hooks[event] as HookGroup[]) : [];
+  hooks[event] = groups;
   for (const group of groups) {
     const list = group.hooks ?? [];
     for (let i = 0; i < list.length; i++) {
@@ -118,8 +145,12 @@ export function hookSelfTest(command: string): { ok: boolean; detail: string } {
 }
 
 function preToolUse(settings: unknown): HookGroup[] {
+  return groupsOf(settings, 'PreToolUse');
+}
+
+function groupsOf(settings: unknown, event: string): HookGroup[] {
   const hooks = asObject(asObject(settings)?.hooks);
-  return Array.isArray(hooks?.PreToolUse) ? (hooks.PreToolUse as HookGroup[]) : [];
+  return Array.isArray(hooks?.[event]) ? (hooks[event] as HookGroup[]) : [];
 }
 
 function commandOf(h: unknown): string | undefined {

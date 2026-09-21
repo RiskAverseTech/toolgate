@@ -4,11 +4,11 @@ import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { runHook, makeBackend, resolveProvider } from './hook.js';
+import { runHook, runPost, makeBackend, resolveProvider } from './hook.js';
 import { runMcp } from './mcp.js';
 import { loadEnvFile, loadPolicy, policyPath } from './policy.js';
 import { decide } from './engine.js';
-import { SETTINGS_PATH, hookCommand, hookSelfTest, installHook, installedHookCommands, readSettings, settingsSnippet, writeSettings } from './install.js';
+import { POST_EVENTS, SETTINGS_PATH, hookCommand, hookSelfTest, installHook, installedHookCommands, installedPostEvents, readSettings, settingsSnippet, writeSettings } from './install.js';
 import type { HookInput } from './types.js';
 
 const HELP = `toolgate — a calibrated tool-call firewall for AI agents
@@ -37,7 +37,13 @@ Usage:
       --print shows the settings snippet instead of writing it.
 
   toolgate install
-      (Re)install the hook into ~/.claude/settings.json — e.g. after upgrading node or toolgate.
+      (Re)install the hooks into ~/.claude/settings.json — e.g. after upgrading node or toolgate.
+      Installs PreToolUse (the gate) and PostToolUse/PostToolUseFailure/PermissionDenied (the
+      action ledger: so a later "bash helper.sh" is judged as what helper.sh does).
+
+  toolgate post
+      Run as the PostToolUse / PostToolUseFailure / PermissionDenied hook: settles the ledger
+      entry for the call. Silent, no model call, never fails.
 
   toolgate doctor
       Check policy, keys, key file, backend, one real decision, and that the installed hook answers.
@@ -111,6 +117,11 @@ async function main(): Promise<void> {
     case 'hook':
       if (process.stdin.isTTY) throw new Error(`hook expects PreToolUse JSON on stdin\n\n${HELP}`);
       return runHook({ policyPath: args.policy, backend: args.backend });
+
+    case 'post':
+      // PostToolUse / PostToolUseFailure / PermissionDenied: settle the ledger. Silent, never fails.
+      if (process.stdin.isTTY) return;
+      return runPost({ policyPath: args.policy });
 
     case 'check': {
       if (!args.tool) throw new Error('check requires --tool');
@@ -258,6 +269,9 @@ async function doctor(policyPath?: string, backendOverride?: string): Promise<bo
   }
   const current = installed === hookCommand();
   line(current, current ? `hook: installed in ${SETTINGS_PATH}` : `hook: installed but not the current command (\`${installed}\`) — run \`toolgate install\` to refresh`);
+  const post = installedPostEvents(readSettings());
+  const postOk = post.length === POST_EVENTS.length;
+  line(postOk, postOk ? `ledger hooks: ${post.join(', ')}` : `ledger hooks: ${post.length ? post.join(', ') : 'none'} — run \`toolgate install\` so write → execute can be tracked`);
   const self = hookSelfTest(installed);
   line(self.ok, `hook self-test: ${self.detail}`);
   return ok && self.ok;

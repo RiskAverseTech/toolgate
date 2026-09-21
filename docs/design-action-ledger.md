@@ -1,6 +1,8 @@
 # Design record: the action ledger (multi-step composition)
 
-Status: **design only, not started.** Recorded 2026-09-20 from the independent review (ChatGPT) so the design exists before the code does. Sequencing, deliberately: finish the untouched 0.9.1 measurement window → second-label it → make the narrowly justified content-vs-action wording change → run [challenge set 6](challenge-set-6.json) once → only then start this. Three kinds of evidence (natural usage, wording validation, multi-step architecture) are kept from contaminating each other.
+Status: **V1 implemented in 0.10.0** (`src/ledger.ts`; hooks installed by `toolgate install`; `toolgate post`). Recorded 2026-09-20 from the independent review (ChatGPT) before the code existed; built 2026-09-21. The original sequencing put this after the set 6 run; on inspection the ledger is orthogonal to set 6 (its cases are independent single calls, so the ledger contributes no facts there), so it was built in parallel with the untouched 0.9.1 measurement window, which never runs 0.10.0. Its own live validation needs a frozen *sequential* set (write, then execute), not yet authored.
+
+Two refinements from the review that followed the design: `PostToolBatch` is a synchronization point for reconciling pending events, not the security primitive; the per-call `tool_use_id` lifecycle stays authoritative (V1 uses only the latter). And, independently, TypeSafe's CEO's public memo on a TypeSafe-native coding agent lists "reading the contents of a file before executing it" as the in-depth permission it would want, and "being explicit about state (reads vs writes)" as its lever; this is that, as a hook.
 
 ## The problem
 

@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, writeFileSync, existsSync, readdirSync } fro
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { hookCommand, hookSelfTest, installHook, installedHookCommands, readSettings, settingsSnippet, writeSettings } from '../src/install.js';
+import { hookCommand, hookSelfTest, installHook, installedHookCommands, installedPostEvents, postCommand, readSettings, settingsSnippet, writeSettings } from '../src/install.js';
 
 const DIST_CLI = join(__dirname, '..', 'dist', 'cli.js');
 
@@ -35,14 +35,29 @@ describe('installHook', () => {
       env: { X: '1' },
       hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'echo other' }, stale] }], Stop: [{ hooks: [] }] },
     };
-    expect(installHook(s)).toBe('updated');
+    // The stale PreToolUse entry is refreshed in place; the ledger's post hooks are new, so the call reports 'added'.
+    expect(installHook(s)).toBe('added');
     const group = (s.hooks as { PreToolUse: Array<{ matcher: string; hooks: Array<{ command: string }> }> }).PreToolUse[0]!;
     expect(group.matcher).toBe('Bash');
     expect(group.hooks[0]!.command).toBe('echo other');
     expect(group.hooks[1]!.command).toBe(hookCommand());
     expect(s.env).toEqual({ X: '1' });
     expect((s.hooks as { Stop: unknown[] }).Stop).toEqual([{ hooks: [] }]);
+    expect(installedPostEvents(s)).toEqual(['PostToolUse', 'PostToolUseFailure', 'PermissionDenied']);
+    for (const ev of ['PostToolUse', 'PostToolUseFailure', 'PermissionDenied']) {
+      const g = (s.hooks as Record<string, Array<{ matcher: string; hooks: Array<{ command: string; timeout: number }> }>>)[ev]![0]!;
+      expect(g.matcher).toBe('*');
+      expect(g.hooks[0]!.command).toBe(postCommand());
+      expect(g.hooks[0]!.timeout).toBe(5);
+    }
     expect(installHook(s)).toBe('unchanged');
+  });
+
+  it('a stale PreToolUse entry with post hooks already present reports updated', () => {
+    const s: Record<string, unknown> = { hooks: { PreToolUse: [{ matcher: '*', hooks: [stale] }] } };
+    installHook(s); // adds post hooks
+    (s.hooks as { PreToolUse: Array<{ hooks: Array<{ command: string }> }> }).PreToolUse[0]!.hooks[0]!.command = stale.command;
+    expect(installHook(s)).toBe('updated');
   });
 
   it('ignores non-toolgate and malformed entries when scanning', () => {

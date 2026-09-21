@@ -69,6 +69,15 @@ audit:
   path: ~/.toolgate/audit.jsonl
   log_input: true          # inputs are truncated and secrets redacted
 
+# The action ledger: per-session record of files this session wrote (proposed at PreToolUse,
+# confirmed by PostToolUse) and what each could do if executed, so a later `bash helper.sh`
+# is judged as what helper.sh does. Stores paths and booleans only, never content.
+# Needs the PostToolUse hooks that `toolgate install` adds.
+ledger:
+  enabled: true
+  dir: ~/.toolgate/ledger
+  max_events: 1000
+
 # Static rules run before the model — first match wins, costs nothing. Order:
 # built-in DENIES first (rm -rf / or ~ — a rule here can never override those),
 # then your rules, then the remaining built-in asks (curl | sh; edits to agent

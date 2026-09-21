@@ -3,6 +3,7 @@ import { loadEnvFile, loadPolicy } from './policy.js';
 import { decide, message } from './engine.js';
 import { writeAudit } from './audit.js';
 import { MockBackend } from './backends/mock.js';
+import { recordProposed, settle } from './ledger.js';
 
 /**
  * Loads the AI SDK only when the model is actually consulted. Importing `ai`
@@ -124,6 +125,9 @@ export async function runHook(opts: { policyPath?: string; backend?: string } = 
     const decision = await decide(input, policy, backend);
     if (decision.source !== 'no-opinion') writeAudit(policy, input, decision, backend.name);
     if (decision.source === 'fail-mode') process.stderr.write(`toolgate: ${decision.reason}\n`); // never silent
+    // Ledger: a write tool call is PROPOSED here (with what the content could do if executed) and
+    // becomes CONFIRMED when PostToolUse arrives for the same tool_use_id (`toolgate post`).
+    if (decision.verdict !== 'deny') recordProposed(policy, input, decision.capabilities, decision.capability_probs);
     out = toHookOutput(decision, { showAllows: policy.show_allows });
   } catch (err) {
     const why = message(err);
@@ -132,3 +136,28 @@ export async function runHook(opts: { policyPath?: string; backend?: string } = 
   }
   if (out) process.stdout.write(JSON.stringify(out));
 }
+
+/**
+ * Run as a Claude Code PostToolUse / PostToolUseFailure / PermissionDenied hook: settle the
+ * ledger event for this tool_use_id. No model call, no output, always exit 0, never throws —
+ * a failure here must not affect the agent, and the ledger is best-effort by design (an
+ * unsettled write only ever makes a later execution stricter, never looser).
+ */
+export async function runPost(opts: { policyPath?: string } = {}): Promise<void> {
+  process.exitCode = 0;
+  try {
+    const input = JSON.parse(await readStdin()) as HookInput & { hook_event_name?: string };
+    if (!input?.session_id || !input.tool_use_id) return;
+    const status = POST_STATUS[input.hook_event_name ?? ''];
+    if (!status) return;
+    settle(loadPolicy(opts.policyPath), input.session_id, input.tool_use_id, status);
+  } catch {
+    // silent by design
+  }
+}
+
+const POST_STATUS: Record<string, 'confirmed' | 'failed' | 'denied'> = {
+  PostToolUse: 'confirmed',
+  PostToolUseFailure: 'failed',
+  PermissionDenied: 'denied',
+};

