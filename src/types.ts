@@ -71,8 +71,8 @@ export interface StaticRule {
 }
 
 export interface Policy {
-  /** auto = typesafe if TYPESAFE_API_KEY is set, else gateway if AI_GATEWAY_API_KEY is set. */
-  backend: { provider: 'auto' | 'typesafe' | 'gateway' | 'mock'; model: string; timeout_ms: number };
+  /** auto = typesafe if TYPESAFE_API_KEY is set, else openrouter if OPENROUTER_API_KEY is set, else gateway if AI_GATEWAY_API_KEY is set. */
+  backend: { provider: 'auto' | 'typesafe' | 'openrouter' | 'gateway' | 'mock'; model: string; timeout_ms: number };
   /** What to do when the decision model errors or times out. */
   fail_mode: 'passthrough' | 'ask' | 'deny';
   /** authorized: P(task calls for this action) at/above which risk is softened one step. */

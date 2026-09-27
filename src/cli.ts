@@ -4,7 +4,7 @@ import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { runHook, runPost, makeBackend, resolveProvider } from './hook.js';
+import { KEY_ENV_VARS, runHook, runPost, makeBackend, resolveProvider } from './hook.js';
 import { runMcp } from './mcp.js';
 import { loadEnvFile, loadPolicy, policyPath } from './policy.js';
 import { decide } from './engine.js';
@@ -14,10 +14,10 @@ import type { HookInput } from './types.js';
 const HELP = `toolgate — a calibrated tool-call firewall for AI agents
 
 Usage:
-  toolgate hook [--policy <path>] [--backend typesafe|gateway|mock]
+  toolgate hook [--policy <path>] [--backend typesafe|openrouter|gateway|mock]
       Run as a Claude Code PreToolUse hook (JSON in on stdin).
 
-  toolgate check --tool <name> --input=<json|string> [--task <text>]... [--backend typesafe|gateway|mock]
+  toolgate check --tool <name> --input=<json|string> [--task <text>]... [--backend typesafe|openrouter|gateway|mock]
       Dry-run a tool call against the policy and print the decision and the exact state sent.
       --task supplies user prompts (repeatable, oldest first; the last is the current task)
       so the context questions are asked.
@@ -51,8 +51,9 @@ Usage:
   toolgate audit [-n <count>] [--stats]
       Show recent audit log entries, or summary statistics (ask/deny rate, latency).
 
-Environment (one key is enough; TYPESAFE_API_KEY wins when both are set):
+Environment (one key is enough; precedence TYPESAFE > OPENROUTER > AI_GATEWAY when several are set):
   TYPESAFE_API_KEY     TypeSafe direct API key (console.typesafe.ai → API Keys)
+  OPENROUTER_API_KEY   OpenRouter key (openrouter.ai/keys) — Jev via the Decisions API
   AI_GATEWAY_API_KEY   Vercel AI Gateway key (vercel.com/<team>/~/ai)
   TOOLGATE_POLICY      Policy file path (default ~/.toolgate/toolgate.yaml)
 `;
@@ -61,7 +62,7 @@ const ENV_FILE = join(homedir(), '.toolgate', 'env');
 
 /** Persist the key so hooks work no matter how Claude Code was launched. */
 function saveKeyFile(): string | undefined {
-  const pairs = ['TYPESAFE_API_KEY', 'AI_GATEWAY_API_KEY'].filter((k) => process.env[k]).map((k) => `${k}=${process.env[k]}`);
+  const pairs = KEY_ENV_VARS.filter((k) => process.env[k]).map((k) => `${k}=${process.env[k]}`);
   if (pairs.length === 0) return undefined;
   mkdirSync(dirname(ENV_FILE), { recursive: true, mode: 0o700 });
   writeFileSync(ENV_FILE, pairs.join('\n') + '\n', { mode: 0o600 });
@@ -225,9 +226,8 @@ async function doctor(policyPath?: string, backendOverride?: string): Promise<bo
     line(false, `policy: ${err instanceof Error ? err.message : err}`);
     return false;
   }
-  const hasTs = Boolean(process.env.TYPESAFE_API_KEY);
-  const hasGw = Boolean(process.env.AI_GATEWAY_API_KEY);
-  line(hasTs || hasGw || backendOverride === 'mock', `keys: TYPESAFE_API_KEY ${hasTs ? 'set' : 'not set'}, AI_GATEWAY_API_KEY ${hasGw ? 'set' : 'not set'}`);
+  const keysSet = KEY_ENV_VARS.filter((k) => process.env[k]);
+  line(keysSet.length > 0 || backendOverride === 'mock', `keys: ${KEY_ENV_VARS.map((k) => `${k} ${process.env[k] ? 'set' : 'not set'}`).join(', ')}`);
   let backend;
   try {
     const provider = resolveProvider(backendOverride ?? policy.backend.provider); // throws with no key
@@ -235,7 +235,7 @@ async function doctor(policyPath?: string, backendOverride?: string): Promise<bo
     line(true, `backend: ${backend.name} (provider ${provider})`);
   } catch (err) {
     line(false, `backend: ${err instanceof Error ? err.message : err}`);
-    console.log('  get a key at console.typesafe.ai (API Keys) or vercel.com/<team>/~/ai, export it, and run `toolgate doctor` again');
+    console.log('  get a key at console.typesafe.ai (API Keys), openrouter.ai/keys or vercel.com/<team>/~/ai, export it, and run `toolgate doctor` again');
     return false;
   }
   const probe: HookInput = { tool_name: 'Bash', tool_input: { command: 'git push --force origin main' }, cwd: process.cwd() };
@@ -250,7 +250,7 @@ async function doctor(policyPath?: string, backendOverride?: string): Promise<bo
   // The checks above prove toolgate works from this shell. The ones below prove it works
   // from Claude Code, which is launched without this shell's PATH or exports.
   let ok = true;
-  const keyFile = existsSync(ENV_FILE) && /^(TYPESAFE_API_KEY|AI_GATEWAY_API_KEY)=./m.test(readFileSync(ENV_FILE, 'utf8'));
+  const keyFile = existsSync(ENV_FILE) && /^(TYPESAFE_API_KEY|OPENROUTER_API_KEY|AI_GATEWAY_API_KEY)=./m.test(readFileSync(ENV_FILE, 'utf8'));
   if (backendOverride !== 'mock') {
     line(keyFile, keyFile ? `key file: ${ENV_FILE} (read by the hook when Claude Code has no shell exports)` : `key file: ${ENV_FILE} missing — run \`toolgate init\`; without it a Dock-launched Claude Code has no key`);
     ok &&= keyFile;

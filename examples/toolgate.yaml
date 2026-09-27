@@ -3,9 +3,9 @@
 # project directories, so a cloned repo can't reconfigure the firewall.
 
 backend:
-  provider: auto           # auto | typesafe | gateway | mock
-                           # auto = typesafe if TYPESAFE_API_KEY is set, else gateway if AI_GATEWAY_API_KEY is set
-  model: auto              # auto = jev-latest (typesafe) / typesafe-ai/jev (gateway)
+  provider: auto           # auto | typesafe | openrouter | gateway | mock
+                           # auto = typesafe if TYPESAFE_API_KEY is set, else openrouter if OPENROUTER_API_KEY is set, else gateway if AI_GATEWAY_API_KEY is set
+  model: auto              # auto = jev-latest (typesafe) / typesafe/jev-1.13 (openrouter) / typesafe-ai/jev (gateway)
   timeout_ms: 5000         # observed ~1 s per call via the Gateway; first call can be slower
 
 # When the decision model is unreachable (static rules still run first either way):

@@ -26,11 +26,17 @@ class LazyGatewayBackend implements DecisionBackend {
 }
 
 /** Which real backend `auto` resolves to, from the environment. */
-export function resolveProvider(provider: string): 'typesafe' | 'gateway' | 'mock' {
-  if (provider !== 'auto') return provider as 'typesafe' | 'gateway' | 'mock';
+export type Provider = 'typesafe' | 'openrouter' | 'gateway' | 'mock';
+
+/** Key precedence for `auto`: TypeSafe direct, then OpenRouter, then Vercel AI Gateway. */
+export const KEY_ENV_VARS = ['TYPESAFE_API_KEY', 'OPENROUTER_API_KEY', 'AI_GATEWAY_API_KEY'] as const;
+
+export function resolveProvider(provider: string): Provider {
+  if (provider !== 'auto') return provider as Provider;
   if (process.env.TYPESAFE_API_KEY) return 'typesafe';
+  if (process.env.OPENROUTER_API_KEY) return 'openrouter';
   if (process.env.AI_GATEWAY_API_KEY) return 'gateway';
-  throw new Error('no API key found: set TYPESAFE_API_KEY (console.typesafe.ai) or AI_GATEWAY_API_KEY (vercel.com/<team>/~/ai)');
+  throw new Error('no API key found: set TYPESAFE_API_KEY (console.typesafe.ai), OPENROUTER_API_KEY (openrouter.ai/keys) or AI_GATEWAY_API_KEY (vercel.com/<team>/~/ai)');
 }
 
 /**
@@ -59,7 +65,24 @@ export function makeBackend(policy: Policy, override?: string): DecisionBackend 
   if (provider === 'mock') return new MockBackend();
   if (provider === 'gateway') return new LazyGatewayBackend(model ?? 'typesafe-ai/jev');
   if (provider === 'typesafe') return new LazyTypeSafeBackend(model ?? 'jev-latest');
-  throw new Error(`unknown backend "${provider}" (expected auto | typesafe | gateway | mock)`);
+  if (provider === 'openrouter') return new LazyOpenRouterBackend(model ?? 'typesafe/jev-1.13');
+  throw new Error(`unknown backend "${provider}" (expected auto | typesafe | openrouter | gateway | mock)`);
+}
+
+class LazyOpenRouterBackend implements DecisionBackend {
+  readonly name: string;
+  private inner?: DecisionBackend;
+  constructor(private readonly model: string) {
+    this.name = `openrouter:${model}`;
+  }
+  async warm(): Promise<void> {
+    const { OpenRouterBackend } = await import('./backends/openrouter.js');
+    this.inner ??= new OpenRouterBackend(this.model);
+  }
+  async evaluate(state: JSONObject, questions: Questions, opts?: { timeoutMs?: number }): Promise<Answers> {
+    await this.warm();
+    return this.inner!.evaluate(state, questions, opts);
+  }
 }
 
 class LazyTypeSafeBackend implements DecisionBackend {

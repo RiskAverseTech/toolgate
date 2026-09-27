@@ -26,10 +26,10 @@ fail() { echo "FAIL: $1"; exit 1; }
 pass() { echo "   ok: $1"; }
 
 echo "== features present in the installed dist"
-for needle in trusted_hosts trusted_tools "too broad" AdvertisedTools "per-axis" toolgate_version user_rules session_facts artifact_sends_data_externally PostToolUseFailure; do
+for needle in trusted_hosts trusted_tools "too broad" AdvertisedTools "per-axis" toolgate_version user_rules session_facts artifact_sends_data_externally PostToolUseFailure session_goal OPENROUTER_API_KEY; do
   grep -rq -- "$needle" "$WORK/proj/node_modules/@riskaverse/toolgate/dist" || fail "dist does not contain '$needle' (stale build?)"
 done
-pass "dist contains every 0.8.0–0.9.2 feature marker"
+pass "dist contains every 0.8.0–0.12.0 feature marker"
 
 echo "== policy validation: over-broad trusted_tools is rejected"
 printf 'backend:\n  provider: mock\naudit:\n  enabled: false\ntrusted_tools: "mcp__.*"\n' > broad.yaml

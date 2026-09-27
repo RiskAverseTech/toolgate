@@ -270,7 +270,7 @@ export function validatePolicy(p: Policy): void {
   const fail = (msg: string): never => {
     throw new Error(`toolgate policy: ${msg}`);
   };
-  if (!['auto', 'typesafe', 'gateway', 'mock'].includes(p.backend.provider)) fail(`unknown backend.provider "${p.backend.provider}"`);
+  if (!['auto', 'typesafe', 'openrouter', 'gateway', 'mock'].includes(p.backend.provider)) fail(`unknown backend.provider "${p.backend.provider}"`);
   if (!(Number.isFinite(p.backend.timeout_ms) && p.backend.timeout_ms > 0)) fail('backend.timeout_ms must be > 0');
   if (!['passthrough', 'ask', 'deny'].includes(p.fail_mode)) fail(`invalid fail_mode "${p.fail_mode}"`);
   const { deny, ask, authorized } = p.thresholds;
