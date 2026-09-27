@@ -106,7 +106,13 @@ export interface Policy {
    * `earlier_prompts`: how many user prompts before the latest to include as context, so a
    * "yes" or "continue" is read together with the instruction it continues.
    */
-  limits: { input_chars: number; task_chars: number; earlier_prompts: number };
+  limits: {
+    input_chars: number;
+    task_chars: number;
+    earlier_prompts: number;
+    /** The session's first substantive user prompt is included as `session_goal`, cut to this many chars; 0 disables. */
+    session_goal_chars: number;
+  };
   /**
    * In these Claude Code permission modes nobody answers a prompt, so an `ask` would be
    * auto-resolved. `unattended.ask` says what an ask becomes there: `deny` (the model is told

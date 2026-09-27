@@ -2,7 +2,11 @@ import { closeSync, fstatSync, openSync, readSync } from 'node:fs';
 import type { HookInput, JSONObject, JSONValue, Policy } from './types.js';
 
 export type Limits = Policy['limits'];
-export const DEFAULT_LIMITS: Limits = { input_chars: 20000, task_chars: 6000, earlier_prompts: 2 };
+export const DEFAULT_LIMITS: Limits = { input_chars: 40000, task_chars: 6000, earlier_prompts: 2, session_goal_chars: 1200 };
+/** A prompt shorter than this is a reaction ("ugh", "yes", "try again"), not a goal. */
+const GOAL_MIN_CHARS = 40;
+/** How much of the transcript's head to scan for the first substantive prompt. */
+const GOAL_SCAN_BYTES = 512 * 1024;
 /** Read the transcript backwards in chunks: a few large tool results can push the last real prompt megabytes from the end. */
 const TRANSCRIPT_CHUNK_BYTES = 256 * 1024;
 const TRANSCRIPT_MAX_BYTES = 16 * 1024 * 1024;
@@ -84,9 +88,43 @@ export function buildState(
         const each = Math.max(200, Math.floor(limits.task_chars / 2));
         state.earlier_prompts = earlier.reverse().map((t) => redact(t.length > each ? t.slice(0, each) + ' …' : t));
       }
+      // The session's opening request. In a long session the latest prompts are "ugh" and "yes pull
+      // it"; the thing the agent is actually doing was stated hours ago. Skipped when it would just
+      // duplicate a prompt the model already sees.
+      if (limits.session_goal_chars > 0) {
+        const goal = sessionGoal(input.transcript_path);
+        if (goal !== undefined && goal !== latest && !earlier.includes(goal)) {
+          state.session_goal = redact(goal.length > limits.session_goal_chars ? goal.slice(0, limits.session_goal_chars) + ' …' : goal);
+        }
+      }
     }
   }
   return state;
+}
+
+/**
+ * The first substantive user prompt of a transcript (≥ GOAL_MIN_CHARS), read forward from the
+ * file's head. Best-effort: any failure means no goal, never a failed gate.
+ */
+export function sessionGoal(transcriptPath: string): string | undefined {
+  let fd: number | undefined;
+  try {
+    fd = openSync(transcriptPath, 'r');
+    const size = Math.min(fstatSync(fd).size, GOAL_SCAN_BYTES);
+    const buf = Buffer.alloc(size);
+    readSync(fd, buf, 0, size, 0);
+    const lines = buf.toString('utf8').split('\n');
+    if (size === GOAL_SCAN_BYTES) lines.pop(); // the last line may be cut
+    for (const line of lines) {
+      const text = userText(line);
+      if (text && text.length >= GOAL_MIN_CHARS) return text;
+    }
+  } catch {
+    // no goal
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+  return undefined;
 }
 
 /** True when either the tool input or the task context was cut — the model did not see everything. */

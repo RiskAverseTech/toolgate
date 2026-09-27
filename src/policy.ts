@@ -129,8 +129,13 @@ export const CAPABILITY_KEYS = new Set(Object.keys(CAPABILITY_QUESTIONS));
  */
 export const UNSOFTENABLE = new Set(['secret_exposure', 'violates_constraint', 'unresolved_choice']);
 
-/** Axes whose strongest verdict is `ask`: an unresolved choice needs a human, not a block. */
-export const ASK_CEILING = new Set(['unresolved_choice']);
+/**
+ * Axes whose strongest verdict is `ask`: an unresolved choice needs a human, not a block, and so
+ * does being off-task. On the 1,369-decision 0.9.1 window every one of the 12 `off_task` denies
+ * was a false positive (sync checks, greps, a security audit the agent was doing) in a long
+ * session with terse prompts. Off-task alone is never harm; the capability axes catch harm.
+ */
+export const ASK_CEILING = new Set(['unresolved_choice', 'off_task']);
 
 /**
  * Built-in static rules. Matched against the tool input's text with quotes and
@@ -189,7 +194,7 @@ export function defaultPolicy(): Policy {
     trusted_tools: '',
     include_task_context: true,
     show_allows: false,
-    limits: { input_chars: 20000, task_chars: 6000, earlier_prompts: 2 },
+    limits: { input_chars: 40000, task_chars: 6000, earlier_prompts: 2, session_goal_chars: 1200 },
     unattended: { modes: ['bypassPermissions', 'dontAsk'], ask: 'deny' },
     audit: { enabled: true, path: join(homedir(), '.toolgate', 'audit.jsonl'), log_input: true },
     ledger: { enabled: true, dir: join(homedir(), '.toolgate', 'ledger'), max_events: 1000 },
@@ -287,9 +292,10 @@ export function validatePolicy(p: Policy): void {
   }
   if (typeof p.include_task_context !== 'boolean') fail('include_task_context must be true or false');
   if (typeof p.show_allows !== 'boolean') fail('show_allows must be true or false');
-  for (const k of ['input_chars', 'task_chars', 'earlier_prompts'] as const) {
+  for (const k of ['input_chars', 'task_chars', 'earlier_prompts', 'session_goal_chars'] as const) {
     const v = p.limits[k];
-    if (!(Number.isInteger(v) && v >= (k === 'earlier_prompts' ? 0 : 500))) fail(`limits.${k} must be an integer${k === 'earlier_prompts' ? ' ≥ 0' : ' ≥ 500'}`);
+    const min = k === 'earlier_prompts' || k === 'session_goal_chars' ? 0 : 500;
+    if (!(Number.isInteger(v) && v >= min)) fail(`limits.${k} must be an integer ≥ ${min}`);
   }
   if (typeof p.ledger.enabled !== 'boolean') fail('ledger.enabled must be true or false');
   if (typeof p.ledger.dir !== 'string' || !p.ledger.dir) fail('ledger.dir must be a path');

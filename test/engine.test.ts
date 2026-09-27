@@ -391,7 +391,7 @@ describe('latency split', () => {
 
 describe('truncated input can never be allowed outright', () => {
   it('caps the verdict at ask', async () => {
-    const big = 'echo ' + 'A'.repeat(25000); // > 20 000 default
+    const big = 'echo ' + 'A'.repeat(45000); // > 40 000 default
     const d = await decide(bash(big), defaultPolicy(), new StubBackend({}));
     expect(d.verdict).toBe('ask');
     expect(d.reason).toContain('too large');
@@ -437,6 +437,64 @@ describe('unattended permission modes', () => {
     expect((await decide({ ...bash('x'), permission_mode: 'auto' }, p, asking)).verdict).toBe('deny');
     expect((await decide({ ...bash('x'), permission_mode: 'bypassPermissions' }, defaultPolicy(), new StubBackend({}))).verdict).toBe('allow');
     expect((await decide({ ...bash('x'), permission_mode: 'bypassPermissions' }, defaultPolicy(), new StubBackend({ destructive: 0.95 }))).verdict).toBe('deny');
+  });
+});
+
+describe('session goal (0.11): the opening request rides along with terse recent prompts', () => {
+  function transcript(prompts: string[]): string {
+    const path = join(mkdtempSync(join(tmpdir(), 'tg-goal-')), 't.jsonl');
+    writeFileSync(path, prompts.map((p) => JSON.stringify({ type: 'user', message: { role: 'user', content: p } })).join('\n') + '\n');
+    return path;
+  }
+  class Capturing implements DecisionBackend {
+    readonly name = 'capturing';
+    state?: JSONObject;
+    questions?: Questions;
+    async evaluate(state: JSONObject, questions: Questions): Promise<Answers> {
+      this.state = state;
+      this.questions = questions;
+      const out: Answers = {};
+      for (const k of Object.keys(questions)) out[k] = { type: 'boolean', probability: 0.01 };
+      return out;
+    }
+  }
+  const GOAL = 'Build the share-links feature: an API route that mints a token and a page that renders it.';
+
+  it('puts the first substantive prompt in the state as session_goal and tells the context questions about it', async () => {
+    const t = transcript([GOAL, 'looks good', 'hmm can you investigate', 'ugh', 'yes pull it']);
+    const b = new Capturing();
+    await decide({ ...bash('git fetch origin main -q && git rev-parse HEAD origin/main'), transcript_path: t }, defaultPolicy(), b);
+    expect(b.state!.current_task).toBe('yes pull it');
+    expect(b.state!.earlier_prompts).toEqual(['hmm can you investigate', 'ugh']);
+    expect(b.state!.session_goal).toBe(GOAL);
+    expect(b.questions!.off_task!.instructions).toContain('session_goal is the first substantive request');
+    expect(b.questions!.destructive!.instructions).not.toContain('session_goal is the first substantive request');
+  });
+
+  it('skips reactions shorter than 40 chars when looking for the goal, and omits the goal when it is already a visible prompt', async () => {
+    const short = transcript(['ok', 'go', 'yes']);
+    const b1 = new Capturing();
+    await decide({ ...bash('ls'), transcript_path: short }, defaultPolicy(), b1);
+    expect('session_goal' in b1.state!).toBe(false);
+    const dup = transcript([GOAL, 'ugh']);
+    const b2 = new Capturing();
+    await decide({ ...bash('ls'), transcript_path: dup }, defaultPolicy(), b2);
+    expect(b2.state!.earlier_prompts).toEqual([GOAL]);
+    expect('session_goal' in b2.state!).toBe(false); // already in earlier_prompts
+  });
+
+  it('caps the goal and redacts secrets in it; session_goal_chars: 0 disables it', async () => {
+    const t = transcript(['Deploy with TOKEN=abc.def.ghi to staging ' + 'x'.repeat(2000), 'a', 'b', 'c']);
+    const b = new Capturing();
+    await decide({ ...bash('ls'), transcript_path: t }, defaultPolicy(), b);
+    const g = b.state!.session_goal as string;
+    expect(g.length).toBeLessThanOrEqual(1200 + 2);
+    expect(g).not.toContain('abc.def.ghi');
+    const off = defaultPolicy();
+    off.limits.session_goal_chars = 0;
+    const b2 = new Capturing();
+    await decide({ ...bash('ls'), transcript_path: t }, off, b2);
+    expect('session_goal' in b2.state!).toBe(false);
   });
 });
 
@@ -708,9 +766,15 @@ describe('reserved-choice guard (0.6.3): a reservation only covers the action it
     expect((await decide(bash('sqlite3 billing.db "DELETE FROM invoices"'), defaultPolicy(), new StubBackend({ destructive: 0.9, unresolved_choice: 0.95 }))).verdict).toBe('deny');
   });
 
-  it('never softens off_task itself', async () => {
-    // off_task at deny level, unresolved_choice high, everything else quiet: stays deny.
-    expect((await taskCmd({ off_task: 0.9, unresolved_choice: 0.95, destructive: 0.01, violates_constraint: 0.01 })).verdict).toBe('deny');
+  it('never softens off_task itself (and off_task alone never exceeds ask, since 0.11)', async () => {
+    // off_task at deny level, unresolved_choice high, everything else quiet: the reservation does
+    // not lower it, and the 0.11 ask ceiling means it lands at ask rather than deny.
+    const d = await taskCmd({ off_task: 0.9, unresolved_choice: 0.95, destructive: 0.01, violates_constraint: 0.01 });
+    expect(d.verdict).toBe('ask');
+    // and with unresolved_choice quiet, the off_task ceiling is what holds it at ask
+    const alone = await taskCmd({ off_task: 0.95, unresolved_choice: 0.05, destructive: 0.01, violates_constraint: 0.01 });
+    expect(alone.verdict).toBe('ask');
+    expect(alone.reason).toMatch(/off task/);
   });
 
   it('STILL softens a genuine reserved choice (on-task, no prohibition) to ask', async () => {

@@ -30,6 +30,7 @@ function taskSummary(d: Decision, logText: boolean): Record<string, unknown> | u
     chars: task.length,
     truncated: d.state.current_task_truncated === true || undefined,
     earlier_prompts: earlier || undefined,
+    goal: typeof d.state.session_goal === 'string' || undefined,
     head: logText ? task.slice(0, MAX_LOGGED_TASK) : undefined, // already redacted in state
   };
 }

@@ -51,10 +51,14 @@ show_allows: false
 # can then be no better than ask; the latest prompt beyond task_chars likewise.
 # earlier_prompts: user prompts before the latest one, included as context so that a
 # "yes" or "continue" is read together with the instruction it continues.
+# session_goal_chars: the session's first substantive prompt (≥ 40 chars) is included as
+# session_goal, cut to this length, so a long session's terse recent prompts are read
+# against what the agent was originally asked to do. 0 disables it.
 limits:
-  input_chars: 20000
+  input_chars: 40000
   task_chars: 6000
   earlier_prompts: 2
+  session_goal_chars: 1200
 
 # Claude Code permission modes in which nobody answers a prompt. An `ask` there would be
 # auto-resolved, so it becomes a `deny` (the model is told why and stops). Set ask: ask

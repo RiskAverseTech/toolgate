@@ -103,7 +103,7 @@ One trusted location: `~/.toolgate/toolgate.yaml` (or `$TOOLGATE_POLICY`). toolg
 backend: { provider: auto, model: auto, timeout_ms: 5000 }   # or typesafe | gateway
 fail_mode: ask
 thresholds: { deny: 0.85, ask: 0.55 }
-limits: { input_chars: 20000, task_chars: 6000, earlier_prompts: 2 }
+limits: { input_chars: 40000, task_chars: 6000, earlier_prompts: 2, session_goal_chars: 1200 }
 unattended: { modes: [bypassPermissions, dontAsk], ask: deny }
 trusted_hosts: [api.acme.com]        # your own hosts — sending data there isn't exfiltration
 trusted_tools: "mcp__myapi__.*"      # your own MCP servers/tools — same idea, by tool name
@@ -172,7 +172,7 @@ These are small constructed sets targeting specific failure categories, not a ge
 
 ## Known limits
 
-- The transcript Claude Code exposes to hooks can lag the live conversation by a turn, so `off_task` may occasionally judge against the previous prompt.
+- The transcript Claude Code exposes to hooks can lag the live conversation by a turn, so `off_task` may occasionally judge against the previous prompt. `off_task` is capped at `ask` (0.11): being off-task is a reason for a human, never a block on its own. In long sessions with terse prompts ("ugh", "yes pull it") the context questions also see `session_goal`, the session's first substantive request, so scope is judged against what the agent was actually asked to do.
 - The default `fail_mode` is `ask`: if the decision model is unreachable, gray-area calls are confirmed rather than allowed (static rules still deny the known-dangerous ones). Set `fail_mode: passthrough` only if you'd rather an outage not interrupt the agent — that trades the firewall's guarantee for uptime.
 - toolgate must answer within Claude Code's hook timeout; a hook that hangs blocks the call. toolgate bounds its own model call (`timeout_ms`, one attempt) to stay well inside it.
 - Classification is on the command as written, not a shell parse: a harmless single-quoted literal that merely contains dangerous-looking text (e.g. `printf '%s' '$(cat .env)'`) can be judged as if it would execute, producing a stricter verdict than needed. A real command parser is a future improvement; the direction of the error is safe.
