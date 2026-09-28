@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.13.1 — the proxy fix that 0.13.0 shipped without
+- 0.13.0 was published from an earlier cut of the release patches and is missing one of the two proxy fixes listed under 0.12.1: a `tools/call` the proxy cannot gate (no id, a JSON-RPC batch, no tool name) was still forwarded untouched. This release contains it. Nothing else in the engine changes.
+- Also carries the frozen challenge set 7 (action ledger, sequential) and `scripts/challenge-seq.mjs`, which 0.13.0's changelog describes but 0.13.0 does not include.
+- Users of the MCP proxy should upgrade; hook-only users are unaffected.
+
 ## 0.13.0 — the ledger sees more ways to run a file, and never degrades silently
 Second half of the same independent code review that produced 0.12.1. No threshold or question wording changes.
 - **`usage()` recognizes five more execution shapes** that previously read as a reference or as nothing: a file fed to an interpreter through `<` or `<<<` (`bash < helper.sh`); a file piped into an interpreter with no file of its own (`cat helper.sh | bash`, `cat x.py | sudo python3 -`); a file inside `$(…)` or backticks (`eval "$(cat helper.sh)"`, `bash -c "$(cat helper.sh)"`); a file inside an interpreter's `-e`/`-c` blob (`node -e "require('./helper.js')"`); and an extensionless basename written this session (`bash helper`), which counts only when fed to an interpreter, never at command position, since a bare word there resolves through PATH. `cat helper.sh | bash other.sh`, `echo "$(cat helper.sh)"`, and a blob naming some other file stay references or nothing. The reviewer's 20-row fixture plus 14 edge rows are the test.
