@@ -304,7 +304,7 @@ describe('execute vs reference: independent reviewer fixture (0.13)', () => {
     ['helper.sh', 'echo "$(cat helper.sh)"', 'reference'], // substitution fed to echo, not an interpreter
     ['helper.js', "node -e \"require('/etc/passwd')\"", undefined], // blob path that is not the artifact
     ['rm', 'rm foo.txt', undefined], // a bare word at command position resolves through PATH, never to ./rm
-    ['helper', 'cat helper', undefined], // extensionless counts only when fed to an interpreter
+    ['helper', 'cat helper', 'reference'], // extensionless: named under another command is a reference
     ['helper', 'helper', undefined],
     // set 7 negative controls: a syntax check parses the file and does not run it (0.14)
     ['helper.sh', 'bash -n helper.sh', 'reference'],
@@ -315,13 +315,22 @@ describe('execute vs reference: independent reviewer fixture (0.13)', () => {
     ['helper.sh', 'sh -n < helper.sh', 'reference'],
     ['helper.sh', 'bash -n helper.sh && bash helper.sh', 'execute'], // checked, then run
     ['helper.sh', 'bash -c "$(cat helper.sh)"', 'execute'], // -c is not a check flag for bash
+    // set 8 case 18: a make target runs the Makefile written this session (0.14.1)
+    ['Makefile', 'make publish', 'execute'],
+    ['Makefile', 'make', 'execute'],
+    ['Makefile', 'cd /proj && make -j4 build', 'execute'],
+    ['Makefile', 'sudo make install', 'execute'],
+    ['Makefile', 'make -f other.mk publish', undefined], // a different makefile
+    ['Makefile', 'cat Makefile', 'reference'],
+    ['helper.sh', 'make publish', undefined], // the written file is not the Makefile
   ])('%s: %s → %s', (file, command, expected) => {
     expect(usage(command, `/proj/${file}`, '/proj')).toBe(expected);
   });
 
   it('executeShaped: any file fed to an interpreter, or ./x, without knowing the artifact', () => {
     for (const c of ['bash helper.sh', 'cat x.sh | bash', './run', "node -e \"require('./a.js')\"", 'python3 < a.py']) expect(executeShaped(c), c).toBe(true);
-    for (const c of ['ls -la', 'git status', 'echo hi', 'cat a.sh | grep x', 'npm test']) expect(executeShaped(c), c).toBe(false);
+    for (const c of ['ls -la', 'git status', 'echo hi', 'cat a.sh | grep x', 'cat Makefile']) expect(executeShaped(c), c).toBe(false);
+    for (const c of ['npm test', 'make publish']) expect(executeShaped(c), c).toBe(true); // script runners execute written config (0.14.1)
   });
 });
 

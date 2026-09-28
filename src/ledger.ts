@@ -139,12 +139,14 @@ const SEPARATORS = new Set(['&&', '||', ';', '|', '(', '{']);
 /** Redirections that feed a file to the command on their left. */
 const STDIN_REDIRECTS = new Set(['<', '<<<']);
 const SCRIPT_RUNNERS = new Set(['npm', 'pnpm', 'yarn', 'bun']);
+const MAKEFILES = new Set(['Makefile', 'makefile', 'GNUmakefile']);
 const SCRIPT_SUBCOMMANDS = new Set(['run', 'run-script', 'test', 'start', 'build', 'dev', 'lint', 'exec', 'x']);
 
 /**
  * How a Bash command touches a written path: 'execute' (interpreter, ./x, command position,
  * stdin of an interpreter via `<` / `<<<` / a pipe, inside `$(…)` or backticks or an
- * interpreter's -e/-c blob, or an npm script when package.json was written), 'reference'
+ * interpreter's -e/-c blob, an npm script when package.json was written, or `make` when the
+ * Makefile was written), 'reference'
  * (named as an argument to something else, e.g. `cat helper.sh`), or undefined.
  * An extensionless basename counts as the written file only when it is fed to an
  * interpreter, never at command position (a bare word there resolves through PATH).
@@ -186,9 +188,20 @@ export function usage(command: string, artifactPath: string, cwd?: string): 'exe
       note('execute');
       continue;
     }
-    if (!asBasename) note('reference');
+    if (!asBasename || gov.kind === 'other') note('reference'); // `cat helper`, `cat Makefile`: named, not run
   }
   if (found === 'execute') return 'execute';
+  // make: runs a recipe from the Makefile in cwd when that Makefile was written (set 8 case 18).
+  const mk = basename(artifactPath);
+  if (MAKEFILES.has(mk) && normalizePath(mk, cwd) === artifactPath) {
+    for (let i = 0; i < tokens.length; i++) {
+      if (tokens[i] === 'make' && (i === 0 || SEPARATORS.has(tokens[i - 1]!) || WRAPPERS.has(tokens[i - 1]!))) {
+        // `make -f other.mk target` runs a different file; anything else runs the Makefile in cwd.
+        const rest = tokens.slice(i + 1).join(' ');
+        if (!/(^|\s)(-f|--file|--makefile)(\s|=)/.test(rest)) return 'execute';
+      }
+    }
+  }
   // npm/pnpm/yarn/bun script: executes package.json's scripts when package.json was written.
   if (artifactPath.endsWith(`${'/'}package.json`) && normalizePath('package.json', cwd) === artifactPath) {
     for (let i = 0; i < tokens.length - 1; i++) {
@@ -201,6 +214,7 @@ export function usage(command: string, artifactPath: string, cwd?: string): 'exe
 /** Would this command run some file (any path fed to an interpreter, or ./x)? Used when the ledger cannot be read. */
 export function executeShaped(command: string): boolean {
   const tokens = tokenize(command);
+  if (tokens[0] === 'make' || SCRIPT_RUNNERS.has(tokens[0] ?? '')) return true;
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i]!;
     const pathy = looksLikePath(t) || (isBlob(t) && innerPaths(t).some(looksLikePath));
