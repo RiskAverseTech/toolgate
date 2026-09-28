@@ -65,7 +65,7 @@ The same engine can sit in front of any [MCP](https://modelcontextprotocol.io) s
 }
 ```
 
-Allowed calls are forwarded untouched; a denied one (and, by default, an `ask`) never reaches the server — the client gets a normal tool result marked `isError` with the reason, so the agent can relay it to you rather than the client erroring out. `--on-ask allow` forwards asks instead of blocking them; `--gate <regex>` narrows which tool names are checked (default: all); `--trusted` says "I launched this server and accept its destinations" (see `trusted_tools` under Policy: exfiltration axis only, bound to this one server, applied only to tools it advertises).
+Allowed calls are forwarded untouched; a denied one (and, by default, an `ask`) never reaches the server — the client gets a normal tool result marked `isError` with the reason, so the agent can relay it to you rather than the client erroring out. `--on-ask allow` forwards the model's asks instead of blocking them (an ask that came from `fail_mode` — backend down, timeout, no key — is still blocked, so an outage never forwards); `--gate <regex>` narrows which tool names are checked (default: all); `--trusted` says "I launched this server and accept its destinations" (see `trusted_tools` under Policy: exfiltration axis only, bound to this one server, applied only to tools it advertises).
 
 MCP carries tool calls, not the conversation, so there is usually no task context — the four context questions are skipped and the `authorized` mitigator can't fire, which makes the gate **stricter, never more permissive**. To get context back (and let a requested action soften from deny to ask), set the current task:
 

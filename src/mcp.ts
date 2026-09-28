@@ -84,11 +84,18 @@ export function blockedResult(id: string | number, decision: Decision): JsonRpcM
   };
 }
 
-/** Given a gate decision, say whether to forward the call or block it with a response. */
+/**
+ * Given a gate decision, say whether to forward the call or block it with a response.
+ * `--on-ask allow` answers "the model said ask and no human is here"; it never answers
+ * "the model did not answer". A fail-mode ask (backend down, timeout, missing key) is
+ * blocked whatever onAsk says — otherwise an outage would forward every call.
+ */
 export function actOnDecision(id: string | number, decision: Decision, onAsk: 'block' | 'allow'): { forward: true } | { forward: false; response: JsonRpcMessage } {
   if (decision.verdict === 'deny') return { forward: false, response: blockedResult(id, decision) };
-  if (decision.verdict === 'ask' && onAsk === 'block') return { forward: false, response: blockedResult(id, decision) };
-  return { forward: true }; // allow, passthrough, or ask when onAsk === 'allow'
+  if (decision.verdict === 'ask' && (onAsk === 'block' || decision.source === 'fail-mode')) {
+    return { forward: false, response: blockedResult(id, decision) };
+  }
+  return { forward: true }; // allow, passthrough, or a model ask when onAsk === 'allow'
 }
 
 /** Read a static task for this session from TOOLGATE_TASK or ~/.toolgate/task, if present. */

@@ -47,6 +47,15 @@ describe('decision → action', () => {
     expect(actOnDecision(1, d('ask'), 'allow').forward).toBe(true);
   });
 
+  it('a fail-mode ask (backend down) is blocked even under on-ask=allow — an outage never forwards', () => {
+    const outage: Decision = { verdict: 'ask', reason: 'timed out after 5000ms; fail_mode=ask', source: 'fail-mode' };
+    const a = actOnDecision(3, outage, 'allow');
+    expect(a.forward).toBe(false);
+    if (!a.forward) expect(JSON.stringify(a.response)).toContain('fail_mode=ask');
+    // fail_mode: passthrough is the operator's explicit fail-open choice and still forwards.
+    expect(actOnDecision(3, { verdict: 'passthrough', reason: 'x; fail_mode=passthrough', source: 'fail-mode' }, 'allow').forward).toBe(true);
+  });
+
   it('a blocked result is a valid JSON-RPC result, not a protocol error', () => {
     const r = blockedResult(3, d('deny'));
     expect(r.jsonrpc).toBe('2.0');
