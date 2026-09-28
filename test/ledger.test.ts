@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from '
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { artifacts, compositionFacts, readEvents, recordProposed, settle, usage, writtenPaths } from '../src/ledger.js';
+import { artifacts, compositionFacts, executeShaped, ledgerUnavailable, readEvents, recordProposed, settle, usage, writtenPaths } from '../src/ledger.js';
 import { decide } from '../src/engine.js';
 import { defaultPolicy } from '../src/policy.js';
 import type { Answers, ArtifactCapabilities, DecisionBackend, HookInput, JSONObject, Policy, Questions } from '../src/types.js';
@@ -95,7 +95,7 @@ describe('execute vs reference detection', () => {
     ['shellcheck examples/helper.sh', 'reference'],
     ['ls -la', undefined],
     ['bash examples/other.sh', undefined],
-    ['echo "bash examples/helper.sh"', undefined], // a quoted string is text, not a path token
+    ['echo "bash examples/helper.sh"', 'reference'], // 0.13: a quoted mention of the file is a reference, not an execution
   ])('%s → %s', (cmd, expected) => {
     expect(usage(cmd, H, CWD)).toBe(expected);
   });
@@ -249,5 +249,95 @@ describe('sequential end-to-end (built CLI, mock backend)', () => {
     writeFileSync(policy, 'backend:\n  provider: mock\naudit:\n  enabled: false\n');
     expect(run('post', {}, home, policy)).toBe('');
     expect(execFileSync('node', [CLI, 'post', '--policy', policy], { input: '{not json', encoding: 'utf8', env: { ...process.env, HOME: home } })).toBe('');
+  });
+});
+
+describe('execute vs reference: independent reviewer fixture (0.13)', () => {
+  // 20 rows from an independent code review of usage(); `expect` is desired behavior. Rows 15–20
+  // were misclassified before 0.13 (15/16/20 → reference; 17/18/19 → no facts). Rows 1–14 must not flip.
+  const FIXTURE: Array<[number, string, string, 'execute' | 'reference' | undefined]> = [
+    [1, 'helper.sh', 'bash helper.sh', 'execute'],
+    [2, 'helper.sh', './helper.sh', 'execute'],
+    [3, 'helper.sh', 'source helper.sh', 'execute'],
+    [4, 'helper.sh', '. helper.sh', 'execute'],
+    [5, 'helper.ts', 'npx tsx helper.ts', 'execute'],
+    [6, 'helper.sh', 'chmod +x helper.sh && ./helper.sh', 'execute'],
+    [7, 'helper.sh', 'bash helper.sh > /tmp/out', 'execute'],
+    [8, 'helper.sh', 'echo hi | bash helper.sh', 'execute'],
+    [9, 'helper.sh', 'bash -x helper.sh', 'execute'],
+    [10, 'helper.sh', 'sudo bash helper.sh', 'execute'],
+    [11, 'package.json', 'npm test', 'execute'],
+    [12, 'helper.sh', 'cat helper.sh', 'reference'],
+    [13, 'helper.sh', 'git add helper.sh', 'reference'],
+    [14, 'helper.sh', 'rm helper.sh', 'reference'],
+    [15, 'helper.sh', 'bash < helper.sh', 'execute'], // A: `<` is the governor
+    [16, 'helper.sh', 'cat helper.sh | bash', 'execute'], // B: stdin of an interpreter across a pipe
+    [17, 'helper.sh', 'eval "$(cat helper.sh)"', 'execute'], // C: path only inside $()
+    [18, 'helper.js', "node -e \"require('./helper.js')\"", 'execute'], // D: path only inside an -e blob
+    [19, 'helper', 'bash helper', 'execute'], // E: extensionless basename written this session
+    [20, 'helper.sh', 'cat helper.sh | sudo bash', 'execute'], // B with a wrapper on the right-hand side
+  ];
+  it.each(FIXTURE)('row %i: %s → %s', (_id, file, command, expected) => {
+    expect(usage(command, `/proj/${file}`, '/proj')).toBe(expected);
+  });
+
+  it.each([
+    ['helper.sh', 'bash -c "$(cat helper.sh)"', 'execute'], // C with a different governor
+    ['helper.sh', 'bash <<< "$(cat helper.sh)"', 'execute'], // herestring, same attack as A
+    ['helper.sh', 'bash <helper.sh', 'execute'], // glued redirect
+    ['helper.py', 'python3 < helper.py', 'execute'],
+    ['helper.py', 'cat helper.py | python3', 'execute'],
+    ['helper.py', 'cat helper.py | python3 -', 'execute'],
+    ['helper.js', "node -e 'require(\"./helper.js\")'", 'execute'], // single-quoted -e
+    ['helper.sh', 'cat helper.sh | bash other.sh', 'reference'], // the interpreter has its own file
+    ['helper.sh', 'cat helper.sh | grep x', 'reference'],
+    ['helper.sh', 'echo "$(cat helper.sh)"', 'reference'], // substitution fed to echo, not an interpreter
+    ['helper.js', "node -e \"require('/etc/passwd')\"", undefined], // blob path that is not the artifact
+    ['rm', 'rm foo.txt', undefined], // a bare word at command position resolves through PATH, never to ./rm
+    ['helper', 'cat helper', undefined], // extensionless counts only when fed to an interpreter
+    ['helper', 'helper', undefined],
+  ])('%s: %s → %s', (file, command, expected) => {
+    expect(usage(command, `/proj/${file}`, '/proj')).toBe(expected);
+  });
+
+  it('executeShaped: any file fed to an interpreter, or ./x, without knowing the artifact', () => {
+    for (const c of ['bash helper.sh', 'cat x.sh | bash', './run', "node -e \"require('./a.js')\"", 'python3 < a.py']) expect(executeShaped(c), c).toBe(true);
+    for (const c of ['ls -la', 'git status', 'echo hi', 'cat a.sh | grep x', 'npm test']) expect(executeShaped(c), c).toBe(false);
+  });
+});
+
+describe('ledger unavailable: gating never silently degrades to one-shot scoring (0.13)', () => {
+  const allowAll: DecisionBackend = {
+    name: 'allow-all',
+    async evaluate(_s: JSONObject, questions: Questions): Promise<Answers> {
+      const out: Answers = {};
+      for (const k of Object.keys(questions)) out[k] = { type: 'boolean', probability: 0.02 };
+      return out;
+    },
+  };
+
+  it('a ledger dir that is not a readable directory floors execute-shaped Bash at ask, leaves other Bash alone', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tg-ledger-broken-'));
+    const p = policyIn(dir);
+    writeFileSync(p.ledger.dir, 'not a directory'); // the ledger path exists but cannot be a ledger
+    expect(ledgerUnavailable(p, 's1')).toBe(true);
+    const run = await decide(bash('s1', 'bash helper.sh'), p, allowAll);
+    expect(run.verdict).toBe('ask');
+    expect(run.reason).toContain('ledger could not be read');
+    const look = await decide(bash('s1', 'cat helper.sh'), p, allowAll);
+    expect(look.verdict).toBe('allow');
+    const noSession = await decide({ ...bash('s1', 'bash helper.sh'), session_id: undefined }, p, allowAll);
+    expect(noSession.verdict).toBe('allow'); // no session, no ledger to be unavailable
+  });
+
+  it('a ledger with no events yet is available, and a disabled ledger is never "unavailable"', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tg-ledger-fresh-'));
+    const p = policyIn(dir);
+    expect(ledgerUnavailable(p, 's2')).toBe(false);
+    expect((await decide(bash('s2', 'bash helper.sh'), p, allowAll)).verdict).toBe('allow');
+    const off = policyIn(dir);
+    off.ledger.enabled = false;
+    writeFileSync(off.ledger.dir + '-x', 'x');
+    expect(ledgerUnavailable(off, 's2')).toBe(false);
   });
 });

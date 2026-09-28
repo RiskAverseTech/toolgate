@@ -117,7 +117,7 @@ questions:
     instructions: This tool call makes a purchase or changes billing.
 ```
 
-See [`examples/toolgate.yaml`](examples/toolgate.yaml) for every knob.
+See [`examples/toolgate.yaml` (every option, with the defaults) and `examples/local-dev.yaml` (a reviewed single-developer setup, annotated)](examples/toolgate.yaml) for every knob.
 
 **`trusted_hosts`** are destinations you declare legitimate for your work (bare hostnames, e.g. `api.acme.com`). They're passed to the model as context, so sending data to a trusted host — or any subdomain of it — is judged as using your own remote, not exfiltration. This is the fix for a real false positive: a first-ever call from a fresh project to its own API with a credential in it satisfies "a host the project doesn't already use" and otherwise scores as a leak. `trusted_hosts` only ever *relaxes* the exfiltration axis for hosts you name; every other axis (and every other host) is unaffected, and secrets are still redacted before anything leaves the machine.
 

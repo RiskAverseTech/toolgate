@@ -175,3 +175,18 @@ describe('tool matchers are always whole-name', () => {
     expect(toolMatcherToRegex('*').test('Anything')).toBe(true);
   });
 });
+
+describe('shipped example policies', () => {
+  it.each(['examples/toolgate.yaml', 'examples/local-dev.yaml'])('%s loads and validates', (f) => {
+    const p = loadPolicy(join(__dirname, '..', f));
+    expect(p.fail_mode).toBe('ask');
+    expect(p.thresholds.deny).toBe(0.85);
+  });
+  it('local-dev adds three ask rules and trusts only loopback hosts', () => {
+    const p = loadPolicy(join(__dirname, '..', 'examples', 'local-dev.yaml'));
+    expect(p.user_rules.map((r) => r.action)).toEqual(['ask', 'ask', 'ask']);
+    expect(p.trusted_hosts).toEqual(['localhost', '127.0.0.1']);
+    expect(new RegExp(p.user_rules[0]!.match.input_regex!, 'i').test('git push origin main --force')).toBe(true);
+    expect(new RegExp(p.user_rules[0]!.match.input_regex!, 'i').test('git push origin main')).toBe(false);
+  });
+});

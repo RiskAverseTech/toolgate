@@ -1,0 +1,82 @@
+# toolgate policy for a typical single-developer box: Claude Code in auto or acceptEdits,
+# a web or Node repo, maybe one or two MCP servers you launched yourself.
+#
+# Copy to ~/.toolgate/toolgate.yaml (or point $TOOLGATE_POLICY at it). Policy is never read
+# from a project directory, so a cloned repo cannot reconfigure the firewall.
+#
+# Every knob below is either the shipped default (kept on purpose, with the reason) or a
+# deliberate local-dev change (marked CHANGED). Drafted by an independent reviewer of the
+# 0.12 source; corrected and maintained here.
+#
+# trusted_hosts / trusted_tools only relax the exfiltration question. They are not an
+# allow-list: static rules and the other six risk axes still run on every call.
+
+backend:
+  provider: auto           # TypeSafe direct, OpenRouter, and Vercel AI Gateway are routes to the
+  model: auto              # same model; measured side by side they are equivalent (~720–780 ms).
+  timeout_ms: 5000         # keep well inside the hook budget; do not raise blindly
+
+fail_mode: ask             # never passthrough on a box that holds credentials. In MCP proxy
+                           # mode pair with --on-ask block (the default); since 0.12.1 a fail-mode
+                           # ask is blocked even under --on-ask allow.
+
+thresholds:
+  deny: 0.85               # the 1,369-decision window gave no reason to move the deny line
+  ask: 0.55                # raising it buys fewer dialogs and more silent mid-band risk
+  authorized: 0.8          # explicit "do this" scores 0.84–0.89, unrelated chatter 0.03–0.18
+
+gated_tools: "Bash|Write|Edit|MultiEdit|NotebookEdit|WebFetch|WebSearch|mcp__.*"
+                           # do not drop Bash or mcp__.* to save latency; that is the blast radius
+
+trusted_hosts:             # CHANGED. Only hosts you send data to on purpose. Subdomains inherit,
+  - localhost              # so name the API host, not the company: api.github.com is fine,
+  - 127.0.0.1              # github.com would also cover gist.github.com.
+  # - api.github.com
+  # - api.vercel.com
+
+trusted_tools: ""          # MCP servers you launched, by whole-name matcher, e.g. "mcp__myapi__.*",
+                           # or pass `toolgate mcp --trusted` for one server at launch.
+
+include_task_context: true # off_task, authorized, violates_constraint, unresolved_choice need it
+show_allows: false         # turn on for a week while calibrating, then off
+
+limits:
+  input_chars: 40000       # 0.11.0 raised this from 20 000: 37 of the window's 286 asks were the
+  task_chars: 6000         # input cap on large Edits and Writes (truncated input floors at ask)
+  earlier_prompts: 2       # "yes" / "go ahead" is read together with what it continues
+  session_goal_chars: 1200 # the session's opening request rides along; 0 disables
+
+unattended:
+  modes: [bypassPermissions, dontAsk]
+  ask: deny                # nobody answers a prompt there; keep deny unless a human really is present
+
+audit:
+  enabled: true
+  path: ~/.toolgate/audit.jsonl
+  log_input: true          # redacted and truncated; you will want it the first time something is denied
+
+ledger:
+  enabled: true            # "write helper.sh, then run it" is the local-dev footgun this catches
+  dir: ~/.toolgate/ledger
+  max_events: 1000
+
+rules:                     # CHANGED. Built-in denies (rm -rf / or ~) still run first and cannot be
+                           # lowered from here. These add local-dev asks the model may treat as work.
+  - match: { tool: Bash, input_regex: 'git\s+push\b.*--force' }
+    action: ask
+    reason: Force-push needs a human even when the task says "ship it"
+  - match: { tool: Bash, input_regex: '\b(npm|pnpm|yarn)\s+publish\b' }
+    action: ask
+    reason: Publishing is not a local-dev default
+  - match: { tool: Bash, input_regex: '\bterraform\s+(apply|destroy)\b' }
+    action: ask
+    reason: Infrastructure mutation
+  # Do not add a static allow for "kill the dev server". That was a 0.6 wording bug, fixed in the
+  # question text; an allow rule here would also hide a real kill.
+
+questions: {}              # do not shadow the built-in wording unless you are re-running the frozen sets
+
+# Matching MCP launch for a server you run yourself:
+#   toolgate mcp --trusted --on-ask block -- npx -y your-local-server
+# --trusted binds to that child's tools/list. Leave --on-ask at block unless the client shows a
+# dialog for an isError result; Cursor and Claude Desktop do not.

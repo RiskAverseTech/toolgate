@@ -1,6 +1,6 @@
-import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { accessSync, appendFileSync, chmodSync, constants, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { isAbsolute, join, resolve } from 'node:path';
+import { basename, isAbsolute, join, resolve } from 'node:path';
 import type { ArtifactCapabilities, CompositionFacts, HookInput, LedgerEvent, Policy } from './types.js';
 import { WRITE_TOOLS } from './policy.js';
 
@@ -127,39 +127,62 @@ export function artifacts(events: LedgerEvent[]): Map<string, Artifact> {
 
 const NONE: ArtifactCapabilities = { reads_sensitive_data: false, sends_data_externally: false, destructive: false, changes_privilege: false };
 
-const INTERPRETERS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish', 'python', 'python3', 'python2', 'node', 'deno', 'bun', 'ruby', 'perl', 'php', 'source', '.', 'exec', 'tsx', 'ts-node', 'osascript', 'pwsh', 'powershell']);
+const INTERPRETERS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish', 'python', 'python3', 'python2', 'node', 'deno', 'bun', 'ruby', 'perl', 'php', 'source', '.', 'exec', 'eval', 'tsx', 'ts-node', 'osascript', 'pwsh', 'powershell']);
 const WRAPPERS = new Set(['sudo', 'env', 'command', 'nohup', 'time', 'xargs', 'nice', 'doas', 'busybox']);
 const SEPARATORS = new Set(['&&', '||', ';', '|', '(', '{']);
+/** Redirections that feed a file to the command on their left. */
+const STDIN_REDIRECTS = new Set(['<', '<<<']);
 const SCRIPT_RUNNERS = new Set(['npm', 'pnpm', 'yarn', 'bun']);
 const SCRIPT_SUBCOMMANDS = new Set(['run', 'run-script', 'test', 'start', 'build', 'dev', 'lint', 'exec', 'x']);
 
 /**
  * How a Bash command touches a written path: 'execute' (interpreter, ./x, command position,
- * or an npm script when package.json was written), 'reference' (named as an argument to
- * something else, e.g. `cat helper.sh`), or undefined.
+ * stdin of an interpreter via `<` / `<<<` / a pipe, inside `$(…)` or backticks or an
+ * interpreter's -e/-c blob, or an npm script when package.json was written), 'reference'
+ * (named as an argument to something else, e.g. `cat helper.sh`), or undefined.
+ * An extensionless basename counts as the written file only when it is fed to an
+ * interpreter, never at command position (a bare word there resolves through PATH).
  */
 export function usage(command: string, artifactPath: string, cwd?: string): 'execute' | 'reference' | undefined {
   const tokens = tokenize(command);
+  const isArtifact = (t: string): boolean => {
+    if (!looksLikePath(t)) return false;
+    try {
+      return normalizePath(t, cwd) === artifactPath;
+    } catch {
+      return false;
+    }
+  };
+  const baseName = basename(artifactPath);
+  const extensionless = !baseName.includes('.') && normalizePath(baseName, cwd) === artifactPath;
   let found: 'execute' | 'reference' | undefined;
+  const note = (how: 'execute' | 'reference'): void => {
+    if (how === 'execute' || !found) found = how;
+  };
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i]!;
-    const bare = t.replace(/^(?:sudo\s+)?/, '');
-    if (!looksLikePath(bare)) continue;
-    let resolved: string;
-    try {
-      resolved = normalizePath(bare, cwd);
-    } catch {
+    const direct = isArtifact(t);
+    const asBasename = !direct && extensionless && t === baseName;
+    const inBlob = !direct && !asBasename && isBlob(t) && innerPaths(t).some(isArtifact);
+    if (!direct && !asBasename && !inBlob) continue;
+    const gov = governorOf(tokens, i);
+    if (gov.kind === 'interpreter') {
+      note('execute');
       continue;
     }
-    if (resolved !== artifactPath) continue;
-    // Walk back over wrappers/flags to the word that governs this token.
-    let j = i - 1;
-    while (j >= 0 && (tokens[j]!.startsWith('-') || WRAPPERS.has(tokens[j]!))) j--;
-    const governor = j >= 0 ? tokens[j]! : undefined;
-    const atCommandPosition = governor === undefined || SEPARATORS.has(governor);
-    if (atCommandPosition || (governor !== undefined && INTERPRETERS.has(governor))) return 'execute';
-    found = 'reference';
+    if (gov.kind === 'command' && !asBasename) {
+      // `./x` or `/abs/x` in command position runs it; a blob at command position does not.
+      note(inBlob ? 'reference' : 'execute');
+      continue;
+    }
+    // Fed to an interpreter on the other side of a pipe: `cat x | bash`, `cat x | sudo python3 -`.
+    if (pipedToInterpreter(tokens, i)) {
+      note('execute');
+      continue;
+    }
+    if (!asBasename) note('reference');
   }
+  if (found === 'execute') return 'execute';
   // npm/pnpm/yarn/bun script: executes package.json's scripts when package.json was written.
   if (artifactPath.endsWith(`${'/'}package.json`) && normalizePath('package.json', cwd) === artifactPath) {
     for (let i = 0; i < tokens.length - 1; i++) {
@@ -169,22 +192,99 @@ export function usage(command: string, artifactPath: string, cwd?: string): 'exe
   return found;
 }
 
+/** Would this command run some file (any path fed to an interpreter, or ./x)? Used when the ledger cannot be read. */
+export function executeShaped(command: string): boolean {
+  const tokens = tokenize(command);
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i]!;
+    const pathy = looksLikePath(t) || (isBlob(t) && innerPaths(t).some(looksLikePath));
+    if (!pathy) continue;
+    const gov = governorOf(tokens, i);
+    if (gov.kind === 'interpreter') return true;
+    if (gov.kind === 'command' && !isBlob(t) && (t.startsWith('./') || t.startsWith('/') || t.startsWith('~'))) return true;
+    if (pipedToInterpreter(tokens, i)) return true;
+  }
+  return false;
+}
+
+/** The word that governs token i, walking back over flags, wrappers, and stdin redirections. */
+function governorOf(tokens: string[], i: number): { kind: 'interpreter' | 'command' | 'other'; word?: string } {
+  let j = i - 1;
+  while (j >= 0 && (tokens[j]!.startsWith('-') || WRAPPERS.has(tokens[j]!) || STDIN_REDIRECTS.has(tokens[j]!))) j--;
+  const word = j >= 0 ? tokens[j] : undefined;
+  if (word === undefined || SEPARATORS.has(word)) return { kind: 'command' };
+  if (INTERPRETERS.has(word)) return { kind: 'interpreter', word };
+  return { kind: 'other', word };
+}
+
+/** True when the pipeline segment holding token i is followed by `| [wrappers] <interpreter> [flags|-]` with no file of its own. */
+function pipedToInterpreter(tokens: string[], i: number): boolean {
+  let k = i + 1;
+  while (k < tokens.length && tokens[k] !== '|' && !SEPARATORS.has(tokens[k]!)) k++;
+  if (k >= tokens.length || tokens[k] !== '|') return false;
+  k++;
+  while (k < tokens.length && (WRAPPERS.has(tokens[k]!) || tokens[k]!.startsWith('-'))) k++;
+  if (k >= tokens.length || !INTERPRETERS.has(tokens[k]!)) return false;
+  for (let m = k + 1; m < tokens.length && !SEPARATORS.has(tokens[m]!); m++) {
+    const a = tokens[m]!;
+    if (a !== '-' && !a.startsWith('-')) return false; // the interpreter has its own file: `cat x | bash other.sh`
+  }
+  return true;
+}
+
 function tokenize(command: string): string[] {
   const out: string[] = [];
   const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(command)) !== null) {
+    const quoted = m[1] !== undefined || m[2] !== undefined;
     const raw = m[1] ?? m[2] ?? m[3] ?? '';
-    // split glued separators like `x;` or `&&y`
-    const parts = raw.split(/(&&|\|\||;|\|)/).filter(Boolean);
+    if (quoted) {
+      out.push(raw);
+      continue;
+    }
+    // split glued separators and stdin redirections like `x;`, `&&y`, `<file`
+    const parts = raw.split(/(&&|\|\||;|\||<<<|<)/).filter(Boolean);
     out.push(...parts);
   }
   return out;
 }
 
+/** A token that carries code or a substitution rather than a single word: `$(cat x)`, `require('./x')`. */
+function isBlob(t: string): boolean {
+  return /\s|\$\(|`|\(/.test(t);
+}
+
+/** Path-like words inside a blob. */
+function innerPaths(t: string): string[] {
+  return (t.match(/[~./A-Za-z0-9_-]+/g) ?? []).filter(looksLikePath);
+}
+
 function looksLikePath(t: string): boolean {
-  if (!t || t.startsWith('-') || SEPARATORS.has(t)) return false;
+  if (!t || t.startsWith('-') || SEPARATORS.has(t) || STDIN_REDIRECTS.has(t)) return false;
   return t.includes('/') || t.includes('.') || t === '~';
+}
+
+/**
+ * True when the ledger is enabled but cannot be read for this session: the directory exists
+ * and is not a readable directory, or the session file exists and is unreadable. A ledger that
+ * simply has no events yet is available. Best-effort gating must not silently become one-shot
+ * scoring, so the engine floors execute-shaped Bash at ask while this is true.
+ */
+export function ledgerUnavailable(policy: Policy, sessionId: string | undefined): boolean {
+  try {
+    if (!policy.ledger.enabled || !sessionId) return false;
+    const file = ledgerPath(policy, sessionId);
+    if (!file) return false;
+    const dir = policy.ledger.dir;
+    if (!existsSync(dir)) return false;
+    if (!statSync(dir).isDirectory()) return true;
+    accessSync(dir, constants.R_OK | constants.X_OK);
+    if (existsSync(file)) accessSync(file, constants.R_OK);
+    return false;
+  } catch {
+    return true;
+  }
 }
 
 /** The facts for a Bash call, from this session's ledger. Undefined when nothing applies. */

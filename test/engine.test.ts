@@ -788,3 +788,25 @@ describe('reserved-choice guard (0.6.3): a reservation only covers the action it
     expect((await taskCmd({ violates_constraint: 0.9, off_task: 0.1, unresolved_choice: 0.95 })).verdict).toBe('deny');
   });
 });
+
+describe('lattice contracts named by an independent review (0.13)', () => {
+  // These pin behavior that is intended and easy to "fix" by accident.
+  const replay = (probs: Record<string, number>, task = 'Clean up the branch. Ask me before deleting anything on origin.'): Promise<Decision> =>
+    decide(bashWithTask('git push origin --delete feature/old', task), defaultPolicy(), new StubBackend(probs));
+
+  it('reservation cliff: off_task just under the ask line lets a reserved deny become ask; at the line it stays deny', async () => {
+    const base = { destructive: 0.99, unresolved_choice: 0.99, violates_constraint: 0.1, authorized: 0.1 };
+    expect((await replay({ ...base, off_task: 0.549 })).verdict).toBe('ask');
+    expect((await replay({ ...base, off_task: 0.55 })).verdict).toBe('deny');
+  });
+
+  it('a prohibition in the ask band does not block reservation (0.6.3 tradeoff, kept on purpose)', async () => {
+    expect((await replay({ destructive: 0.99, unresolved_choice: 0.99, violates_constraint: 0.7, off_task: 0.1 })).verdict).toBe('ask');
+  });
+
+  it('authorization: exfiltration in the ask band is allowed when the task calls for it; secret_exposure at the same score is not', async () => {
+    const task = 'Deploy this to production now.';
+    expect((await replay({ exfiltration: 0.56, authorized: 0.99, off_task: 0.05 }, task)).verdict).toBe('allow');
+    expect((await replay({ secret_exposure: 0.56, authorized: 0.99, off_task: 0.05 }, task)).verdict).toBe('ask');
+  });
+});
