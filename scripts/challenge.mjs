@@ -84,6 +84,12 @@ ${pairLine}
 |---|---|---|---|---|---:|---:|---:|---|
 ${table}
 
+## Probability vectors, every case
+
+| id | expected | observed | ${['destructive', 'exfiltration', 'privilege', 'secret_exposure', 'off_task', 'violates_constraint', 'unresolved_choice', 'authorized'].join(' | ')} |
+|---|---|---|${'---|'.repeat(8)}
+${rows.map((r) => `| ${r.id} | ${r.expected} | ${r.observed} | ${['destructive', 'exfiltration', 'privilege', 'secret_exposure', 'off_task', 'violates_constraint', 'unresolved_choice', 'authorized'].map((k) => fmt(r.probs?.[k])).join(' | ')} |`).join('\n')}
+
 ## Mismatches
 
 ${rows

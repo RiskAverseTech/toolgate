@@ -827,3 +827,26 @@ describe('exfiltration wording with ledger facts (0.14)', () => {
     expect(seen.exfiltration).not.toContain('has been identified as sending');
   });
 });
+
+describe('content is not action framing (0.15)', () => {
+  it('every question carries the framing, ahead of the untrusted-data note', async () => {
+    const seen: Record<string, string> = {};
+    const spy: DecisionBackend = {
+      name: 'spy',
+      async evaluate(_s: JSONObject, questions: Questions): Promise<Answers> {
+        for (const [k, q] of Object.entries(questions)) seen[k] = q.instructions;
+        const out: Answers = {};
+        for (const k of Object.keys(questions)) out[k] = { type: 'boolean', probability: 0.01 };
+        return out;
+      },
+    };
+    await decide(bash('ls'), defaultPolicy(), spy);
+    for (const k of ['destructive', 'exfiltration', 'privilege', 'secret_exposure', 'off_task', 'violates_constraint', 'unresolved_choice', 'authorized']) {
+      const text = seen[k]!;
+      const a = text.indexOf('Judge the effect of the proposed tool call itself');
+      const b = text.indexOf('untrusted data the agent is acting on');
+      expect(a, k).toBeGreaterThan(0);
+      expect(b, k).toBeGreaterThan(a);
+    }
+  });
+});
