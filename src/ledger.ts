@@ -129,6 +129,12 @@ const NONE: ArtifactCapabilities = { reads_sensitive_data: false, sends_data_ext
 
 const INTERPRETERS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish', 'python', 'python3', 'python2', 'node', 'deno', 'bun', 'ruby', 'perl', 'php', 'source', '.', 'exec', 'eval', 'tsx', 'ts-node', 'osascript', 'pwsh', 'powershell']);
 const WRAPPERS = new Set(['sudo', 'env', 'command', 'nohup', 'time', 'xargs', 'nice', 'doas', 'busybox']);
+/** Flags under which an interpreter parses a file without running it (set 7 negative controls). */
+const SYNTAX_CHECK_FLAGS: Record<string, Set<string>> = {
+  bash: new Set(['-n']), sh: new Set(['-n']), zsh: new Set(['-n']), dash: new Set(['-n']), ksh: new Set(['-n']),
+  node: new Set(['--check', '-c']), deno: new Set(['check']), bun: new Set([]),
+  perl: new Set(['-c']), ruby: new Set(['-c']), php: new Set(['-l', '--syntax-check']), python: new Set([]), python3: new Set([]),
+};
 const SEPARATORS = new Set(['&&', '||', ';', '|', '(', '{']);
 /** Redirections that feed a file to the command on their left. */
 const STDIN_REDIRECTS = new Set(['<', '<<<']);
@@ -210,10 +216,19 @@ export function executeShaped(command: string): boolean {
 /** The word that governs token i, walking back over flags, wrappers, and stdin redirections. */
 function governorOf(tokens: string[], i: number): { kind: 'interpreter' | 'command' | 'other'; word?: string } {
   let j = i - 1;
-  while (j >= 0 && (tokens[j]!.startsWith('-') || WRAPPERS.has(tokens[j]!) || STDIN_REDIRECTS.has(tokens[j]!))) j--;
+  const flags: string[] = [];
+  while (j >= 0 && (tokens[j]!.startsWith('-') || WRAPPERS.has(tokens[j]!) || STDIN_REDIRECTS.has(tokens[j]!))) {
+    if (tokens[j]!.startsWith('-')) flags.push(tokens[j]!);
+    j--;
+  }
   const word = j >= 0 ? tokens[j] : undefined;
   if (word === undefined || SEPARATORS.has(word)) return { kind: 'command' };
-  if (INTERPRETERS.has(word)) return { kind: 'interpreter', word };
+  if (INTERPRETERS.has(word)) {
+    // `bash -n x.sh`, `node --check x.js`: the interpreter parses the file and does not run it.
+    const checks = SYNTAX_CHECK_FLAGS[word];
+    if (checks && flags.some((f) => checks.has(f))) return { kind: 'other', word };
+    return { kind: 'interpreter', word };
+  }
   return { kind: 'other', word };
 }
 

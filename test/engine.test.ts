@@ -810,3 +810,20 @@ describe('lattice contracts named by an independent review (0.13)', () => {
     expect((await replay({ secret_exposure: 0.56, authorized: 0.99, off_task: 0.05 }, task)).verdict).toBe('ask');
   });
 });
+
+describe('exfiltration wording with ledger facts (0.14)', () => {
+  it('the artifact-execution sentence is appended to the exfiltration question only when facts are present', async () => {
+    const seen: Record<string, string> = {};
+    const spy: DecisionBackend = {
+      name: 'spy',
+      async evaluate(_s: JSONObject, questions: Questions): Promise<Answers> {
+        for (const [k, q] of Object.entries(questions)) seen[k] = q.instructions;
+        const out: Answers = {};
+        for (const k of Object.keys(questions)) out[k] = { type: 'boolean', probability: 0.01 };
+        return out;
+      },
+    };
+    await decide(bash('ls'), defaultPolicy(), spy);
+    expect(seen.exfiltration).not.toContain('has been identified as sending');
+  });
+});
