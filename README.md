@@ -176,7 +176,7 @@ These are small constructed sets targeting specific failure categories, not a ge
 - The default `fail_mode` is `ask`: if the decision model is unreachable, gray-area calls are confirmed rather than allowed (static rules still deny the known-dangerous ones). Set `fail_mode: passthrough` only if you'd rather an outage not interrupt the agent — that trades the firewall's guarantee for uptime.
 - toolgate must answer within Claude Code's hook timeout; a hook that hangs blocks the call. toolgate bounds its own model call (`timeout_ms`, one attempt) to stay well inside it.
 - Classification is on the command as written, not a shell parse: a harmless single-quoted literal that merely contains dangerous-looking text (e.g. `printf '%s' '$(cat .env)'`) can be judged as if it would execute, producing a stricter verdict than needed. A real command parser is a future improvement; the direction of the error is safe.
-- MCP proxy mode has no conversation, so it runs without task context by default (see above): stricter, and `ask` blocks unless you pass `--on-ask allow`. It gates `tools/call`; other MCP methods (resources, prompts) pass through.
+- MCP proxy mode has no conversation, so it runs without task context by default (see above): stricter, and `ask` blocks unless you pass `--on-ask allow`. It gates `tools/call`; other MCP methods (resources, prompts) pass through, so a filesystem server's `resources/read` is not judged. A `tools/call` the proxy cannot gate (no id, a batch, no tool name) is dropped, never forwarded.
 
 ## Roadmap
 

@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { AdvertisedTools, actOnDecision, blockedResult, createFramer, isToolCall, parseMessage, trustDecision } from '../src/mcp.js';
+import { AdvertisedTools, actOnDecision, blockedResult, createFramer, isToolCall, isUngateableToolCall, parseMessage, trustDecision } from '../src/mcp.js';
 import type { Decision } from '../src/types.js';
 
 const CLI = join(__dirname, '..', 'dist', 'cli.js');
@@ -21,6 +21,24 @@ describe('message parsing and classification', () => {
     expect(isToolCall(parseMessage('{"jsonrpc":"2.0","id":1,"method":"tools/list"}'))).toBe(false);
     expect(isToolCall(parseMessage('{"jsonrpc":"2.0","method":"tools/call","params":{"name":"x"}}'))).toBe(false); // notification, no id
     expect(isToolCall(parseMessage('{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{}}'))).toBe(false); // no name
+  });
+});
+
+describe('tools/call shapes that cannot be gated are never forwarded', () => {
+  it('notification-shaped call (no id), batch, and nameless call are all flagged', () => {
+    const notif = '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"delete_all","arguments":{}}}';
+    const batch = '[{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"delete_all","arguments":{}}}]';
+    const nameless = '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"arguments":{"cmd":"x"}}}';
+    for (const l of [notif, batch, nameless]) {
+      const m = parseMessage(l);
+      expect(isToolCall(m)).toBe(false);
+      expect(isUngateableToolCall(l, m)).toBe(true);
+    }
+  });
+  it('ordinary traffic is not flagged', () => {
+    for (const l of ['{"jsonrpc":"2.0","id":1,"method":"tools/list"}', '{"jsonrpc":"2.0","method":"notifications/initialized"}', '{"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":"file:///x"}}', 'not json at all']) {
+      expect(isUngateableToolCall(l, parseMessage(l))).toBe(false);
+    }
   });
 });
 

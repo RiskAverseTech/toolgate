@@ -60,6 +60,16 @@ export function parseMessage(line: string): JsonRpcMessage | undefined {
 }
 
 /** A client→server message we must gate: a JSON-RPC request (has id) calling method "tools/call". */
+/**
+ * A line that mentions tools/call but is not a gateable call: a notification-shaped call
+ * (no id), a JSON-RPC batch, or a call without a string name. A spec-compliant server would
+ * ignore or reject these; a lenient one might execute them. They are never forwarded.
+ */
+export function isUngateableToolCall(line: string, m: JsonRpcMessage | undefined): boolean {
+  if (m !== undefined) return m.method === 'tools/call' && !isToolCall(m);
+  return /"tools\/call"/.test(line); // unparsable or a batch array that names the method
+}
+
 export function isToolCall(m: JsonRpcMessage | undefined): m is JsonRpcMessage & { id: string | number; params: { name: string; arguments?: unknown } } {
   return (
     m !== undefined &&
@@ -250,6 +260,13 @@ export async function runMcp(opts: McpOptions, command: string[]): Promise<void>
     const m = parseMessage(line);
     advertised.noteRequest(m);
     if (!isToolCall(m)) {
+      if (isUngateableToolCall(line, m)) {
+        // Dropped, not forwarded: nothing to gate and nothing safe to pass. Reply when we can.
+        const id = m && (typeof m.id === 'string' || typeof m.id === 'number') ? m.id : undefined;
+        if (id !== undefined) toClient(blockedResult(id, { verdict: 'deny', reason: 'malformed tools/call is not forwarded', source: 'static-rule' }));
+        process.stderr.write('toolgate mcp: dropped a tools/call that could not be gated (notification, batch, or missing name)\n');
+        return;
+      }
       toServer(line);
       return;
     }
