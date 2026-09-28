@@ -840,7 +840,7 @@ describe('content is not action framing (0.15)', () => {
         return out;
       },
     };
-    await decide(bash('ls'), defaultPolicy(), spy);
+    await decide(bashWithTask('ls', 'List the files in this project, please.'), defaultPolicy(), spy); // a task, so the context questions are asked too
     for (const k of ['destructive', 'exfiltration', 'privilege', 'secret_exposure', 'off_task', 'violates_constraint', 'unresolved_choice', 'authorized']) {
       const text = seen[k]!;
       const a = text.indexOf('Judge the effect of the proposed tool call itself');
