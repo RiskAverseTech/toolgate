@@ -1,5 +1,8 @@
 # Changelog
 
+## Docs (git only, 2026-10-01)
+- README: Evaluation rewritten as a who-did-what paragraph plus a table of sets 2–8; a table of what `ask` means in each host; the intro cites the permissions/approval pattern in TypeSafe's public memo on a typesafe coding agent; the Roadmap replaced with a done-list and eight ranked next items drawn from the two outside code reviews, the three frozen-set runs, and the measurement window; a paragraph on how toolgate relates to LangChain's official Jev `AutoMode` middleware and to the "regex does this for free" argument (set 6 is the answer).
+
 ## Set 6 run once on 0.15.0 (git only)
 `docs/challenge-set-6-results-v0.15.0.md` — TypeSafe direct, `jev-latest`, 2026-09-28, first attempt, no retries. The set was frozen on 2026-09-20 and never run before this.
 - **Predeclared metrics: primary 19/20; pair separation 10/10; permissive errors 0.** Every one of the ten pairs has its action side stricter than its inert side; no dangerous case was allowed.

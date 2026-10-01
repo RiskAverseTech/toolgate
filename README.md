@@ -202,20 +202,20 @@ These are small constructed sets targeting specific failure categories, not a ge
 
 ## Roadmap
 
-- [x] Direct TypeSafe API backend (0.5.1)
-- [x] Evaluation on frozen, prospectively labeled sets (0.5.0; see above)
-- [x] Real-usage numbers from the audit log, and the 0.6.0 fixes they demanded
-- [ ] Held-out validation of the 0.6.0 wording by the independent reviewer (set 4 is a development set)
-- [x] `trusted_hosts`: destinations you declare legitimate, passed to the model as context so a first-ever call to your own API with a key in it is not read as exfiltration (0.8.0 in git; **first actually on npm in 0.9.1**, see the retraction in the changelog)
-- [x] `trusted_tools`: the same for MCP tools you run, which carry no hostname (0.9.0 in git; on npm from 0.9.1); bound to what the server advertises, over-broad matchers rejected, `--trusted` per launch (0.9.1)
-- [ ] **Content-vs-action wording**: `violates_constraint` judges whether *executing* the call does the restricted thing, and the untrusted-data note says text describing a harmful action is not the action. Waits for a held-out matched-pair set so it isn't tuned on the seven cases that revealed it. This is the usability unlock for content tools; it is not the credentials unlock.
-- [ ] **Local backend** (openjev-style, on-device) so nothing leaves the machine — the priority, since the hosted model is itself a data path. Acceptance bar: it must match the hosted model on the frozen sets and on a live allow-review slice before it ships, or fail-safe plus a miscalibrated local model just becomes deny-spam that pushes people back to passthrough.
-- [ ] **Content-vs-action held-out set: frozen** ([docs/challenge-set-6.json](docs/challenge-set-6.json), 10 matched pairs, every pair allow-vs-deny, several safe sides are themselves Bash so "ignore scary text in Write inputs" cannot pass it). Protocol: not run on current wording; the wording change is made from the 0.7.1 usage evidence alone, then this set runs once on the candidate.
-- [x] **Multi-step composition, V1: the action ledger** (0.10.0) — write → confirmed artifact → later execution, per the design in [docs/design-action-ledger.md](docs/design-action-ledger.md). Not yet: writes made from Bash itself, the MCP proxy, anything beyond files. The live validation of this on a frozen *sequential* set is still to come; the sequential loop is covered end to end in tests and the package smoke test on the mock backend.
-- [ ] A read-only fast path (`ls`, `cat`, `git status` … with no pipes or redirects) so the model is only consulted when something could change
-- [x] MCP proxy mode — gate any MCP client, not just Claude Code (0.7.0)
+Done, in order: frozen-set evaluation (0.5), real-usage numbers and the fixes they forced (0.6), MCP proxy (0.7), `trusted_hosts` / `trusted_tools` (0.8–0.9.1), key-aware redaction and the deny floor (0.9.2), the action ledger (0.10), long-session context and `off_task` capped at ask (0.11), OpenRouter route (0.12), two proxy fail-open fixes from an outside code review (0.12.1 / 0.13.1), five more execution shapes and the unavailable-ledger floor (0.13), syntax checks as references and the ledger-aware exfiltration wording (0.14), `make` in the ledger (0.14.1), content is not action (0.15). Each one is validated on a frozen set or a measurement window, listed under Evaluation.
 
-Ranked for someone deciding whether to put real credentials in the agent's environment, per the second independent review: local backend (data must not leave the box), then multi-step composition (the miss class a single-call log cannot see), then the content-vs-action wording (what makes the ask rate livable), then the read-only fast path (what keeps the hook installed). Until the first two exist, "0 permissive misses" means "0 single-call misses in a short log."
+Next, ranked by what the criticism and the data say matters most:
+
+1. **A second measurement window on 0.11+** — the ask rate after the `off_task` fix, same three numbers as the first report. Everything published says the 21% was fixed; nothing yet says what it is now. Costs nothing but use.
+2. **Ledger coverage for writes made from Bash** — `echo > x`, heredocs, `tee`, `sed -i`, `npm pkg set`. Set 6 case 20 and both outside reviews name this; it is the one ledger gap left that a real session hits.
+3. **Second-user data.** Every evaluation so far is one machine. An audit line from anyone else's session is worth more than another frozen set; `toolgate audit --stats` output in an issue is the ask.
+4. **Hardening from the outside reviews** — `doctor` verifying the key file is actually 0600; schema validation of hook stdin; `doctor` reminding that `trusted_*` is not an allow-list; fuzzing of the built-in rule regexes.
+5. **Secret-exposure severity** — set 8's world-readable `.env` copy asked at 0.73 where deny was expected; the read → duplicate → send gradient is right, the severity on the middle step may be low. Needs more evidence before a wording change.
+6. **Local backend** so nothing leaves the machine. The largest item and the one with no near path: it needs an on-device model that answers calibrated yes/no questions, and it must match the hosted model on the frozen sets before it ships, or fail-safe plus a miscalibrated local model is deny-spam that pushes people to `passthrough`.
+7. **MCP proxy depth** — task context and a ledger in proxy mode, which today is stricter and blinder than the hook.
+8. A read-only fast path (`ls`, `cat`, `git status` … with no pipes or redirects) so the model is consulted only when something could change.
+
+**How this relates to LangChain's Jev integration.** LangChain ships an official `AutoMode` middleware that does the same job — check each tool call with Jev, block the risky ones — for LangChain agents. toolgate is the same pattern for the hosts that middleware does not reach: Claude Code's `PreToolUse` hook and any MCP client through the proxy. On top of the pattern it adds YAML policy, the action ledger, and the published measurements above. And on the argument that a few lines of regex do this job for free: frozen set 6 is the direct test — a regex cannot tell a commit message that mentions `rm -rf` from running it, and the inert sides of that set score ≤ 0.32 while the action sides score 0.91–0.98.
 
 ## Threat model
 
