@@ -181,6 +181,19 @@ Backends are pluggable (`DecisionBackend`: `evaluate(state, questions) → answe
 
 Flag-carried effects (`--draft=false`, `git clean -f` vs `-n`, missing `--dry-run`), bundles distinguished only by a second-half flag, and settled-vs-reserved choices on identical commands all separate cleanly. The development sets (1 and 4) are the maintainer's and are not held out.
 
+**Reproduce it.** The sets, the runners, and the pinned results are all in the repo; nothing in a run is executed, and the runners never retry.
+
+```bash
+git clone https://github.com/RiskAverseTech/toolgate && cd toolgate
+npm ci && npm run build && npm test
+export TYPESAFE_API_KEY=...                         # or OPENROUTER_API_KEY
+node scripts/challenge.mjs docs/challenge-set-6.json                       # single-call sets (2, 3, 5, 6)
+node scripts/challenge-seq.mjs docs/challenge-set-7-action-ledger.json     # sequential sets (7, 8): write → run
+TOOLGATE_BACKEND=mock node scripts/challenge.mjs docs/challenge-set-6.json # offline check of the harness itself
+```
+
+Each runner prints the set's sha256 or name, every verdict with its probability vector, and writes a markdown report next to the set. Scores on a re-run are a regression check against the pinned result, not a new evaluation: the published number for each set is its first and only run on the build named in the table. Working-directory and home paths are replaced with placeholders in the report, so it is safe to publish as written.
+
 **Real usage, measured.** A clean seven-day window on 0.9.1 (1,369 decisions, policy untouched) was blind-labeled on 455 items by the independent reviewer with no verdicts or scores visible: toolgate was stricter than the reviewer on 268 items and looser on 12; zero denies and five context-limited asks among 150 sampled allows; 230 of 243 `off_task`-topped interruptions labeled allow. That one axis was the whole friction problem, and 0.11.0 is the response. Report: `docs/usage-2026-09-27.md`. The next window, on 0.11+, is the number that matters next.
 
 **Latency from a laptop.** The measurement window ran at 1,060 ms p50 / 1,216 ms p90 (1,368 calls, direct API). A same-minute side-by-side on 2026-09-27 put the direct API at 742–878 ms (median 782) and OpenRouter's Decisions API at 724–813 ms after a 1.1 s cold first call (median 724): equivalent routes. The benchmark runs on 2026-09-28 ran at 350–600 ms per call with full ledger state attached. Earlier: direct 1208 ms, Vercel Gateway 1324 ms (the Gateway adds ~100 ms). TypeSafe quotes 70–500 ms; the low end has not been observed from outside their infrastructure. Static rules take ~90 ms and never call the model.

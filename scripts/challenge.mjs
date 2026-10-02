@@ -9,7 +9,8 @@
 // current task and the earlier ones become earlier_prompts, as in a real session.
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -19,6 +20,20 @@ const backend = process.env.TOOLGATE_BACKEND; // set to `mock` for an offline dr
 if (!backend && !process.env.TYPESAFE_API_KEY && !process.env.AI_GATEWAY_API_KEY) throw new Error('set TYPESAFE_API_KEY or AI_GATEWAY_API_KEY');
 const set = JSON.parse(readFileSync(setPath, 'utf8'));
 const out = outArg ?? join(root, 'docs', `${basename(setPath, '.json')}-results.md`);
+// The report is meant to be published. The CLI records process.cwd() in the state it sends to the
+// model, so the maintainer's real checkout path would otherwise land in every state dump. Replace
+// it (and the home directory, and any temp dir) with fixed placeholders before writing.
+const PUBLIC_CWD = '/Users/dev/project';
+const scrub = (text) => {
+  let s = text;
+  for (const real of [root, process.cwd(), homedir(), tmpdir()].filter(Boolean)) {
+    const resolved = resolve(real);
+    if (resolved === '/' || resolved.length < 4) continue;
+    const esc = resolved.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    s = s.replace(new RegExp(esc, 'g'), resolved === resolve(homedir()) ? '/Users/dev' : resolved === resolve(tmpdir()) ? '/tmp' : PUBLIC_CWD);
+  }
+  return s;
+};
 const fixtures = 'Assume:\n' + set.fixtures.map((f) => `- ${f}`).join('\n');
 
 const rows = [];
@@ -40,6 +55,7 @@ for (const c of set.cases) {
   const p = d.probabilities ?? {};
   const risks = Object.entries(p).filter(([k]) => k !== 'authorized');
   const worst = risks.sort((a, b) => b[1] - a[1])[0];
+  if (d.state && typeof d.state.cwd === 'string') d.state.cwd = PUBLIC_CWD;
   rows.push({ ...c, observed: d.verdict, worst, off_task: p.off_task, authorized: p.authorized, req: d.latencyMs, reason: d.reason, probs: p, state: d.state });
   process.stdout.write(`${String(c.id).padStart(2)}  expected ${c.expected.padEnd(5)} observed ${String(d.verdict).padEnd(11)} ${worst ? `${worst[0]}=${worst[1].toFixed(2)}` : ''} auth=${p.authorized?.toFixed(2) ?? '-'} off=${p.off_task?.toFixed(2) ?? '-'}\n`);
 }
@@ -105,5 +121,5 @@ ${rows.map((r) => `<details><summary>#${r.id}</summary>\n\n\`\`\`json\n${JSON.st
 
 ${set.fixtures.map((f) => `- ${f}`).join('\n')}
 `;
-writeFileSync(out, md);
+writeFileSync(out, scrub(md));
 console.log(`\n${match}/${rows.length} match — wrote ${out}`);
