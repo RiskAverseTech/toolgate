@@ -78,8 +78,9 @@ export function buildState(
   if (input.permission_mode) state.permission_mode = input.permission_mode;
   if (trustedHosts.length > 0) state.trusted_hosts = [...trustedHosts];
   if (trustedTool) state.trusted_tool = true; // this tool is one the user declared their own service
-  if (includeTaskContext && input.transcript_path) {
-    const [latest, ...earlier] = recentUserPrompts(input.transcript_path, 1 + limits.earlier_prompts);
+  if (includeTaskContext) {
+    const supplied = promptsFrom(input, limits);
+    const [latest, ...earlier] = supplied ?? (input.transcript_path ? recentUserPrompts(input.transcript_path, 1 + limits.earlier_prompts) : []);
     if (latest !== undefined) {
       state.current_task = redact(latest.slice(0, limits.task_chars));
       if (latest.length > limits.task_chars) state.current_task_truncated = true;
@@ -92,7 +93,7 @@ export function buildState(
       // it"; the thing the agent is actually doing was stated hours ago. Skipped when it would just
       // duplicate a prompt the model already sees.
       if (limits.session_goal_chars > 0) {
-        const goal = sessionGoal(input.transcript_path);
+        const goal = supplied ? goalFrom(input) : input.transcript_path ? sessionGoal(input.transcript_path) : undefined;
         if (goal !== undefined && goal !== latest && !earlier.includes(goal)) {
           state.session_goal = redact(goal.length > limits.session_goal_chars ? goal.slice(0, limits.session_goal_chars) + ' …' : goal);
         }
@@ -100,6 +101,24 @@ export function buildState(
     }
   }
   return state;
+}
+
+/**
+ * Prompts a host supplied in `task_context`, in the order recentUserPrompts returns them (newest
+ * first, then older, newest-of-the-older first). Undefined when none were supplied, so the
+ * transcript path is read instead.
+ */
+function promptsFrom(input: HookInput, limits: Limits): string[] | undefined {
+  const tc = input.task_context;
+  if (!tc || typeof tc.current_task !== 'string' || tc.current_task.length === 0) return undefined;
+  const earlier = (tc.earlier_prompts ?? []).filter((p): p is string => typeof p === 'string' && p.length > 0);
+  // earlier_prompts arrive oldest first; recentUserPrompts' order is newest first.
+  return [tc.current_task, ...earlier.slice(-limits.earlier_prompts).reverse()];
+}
+
+function goalFrom(input: HookInput): string | undefined {
+  const g = input.task_context?.session_goal;
+  return typeof g === 'string' && g.length >= GOAL_MIN_CHARS ? g : undefined;
 }
 
 /**

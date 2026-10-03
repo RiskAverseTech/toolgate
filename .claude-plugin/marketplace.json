@@ -1,0 +1,14 @@
+{
+  "name": "riskaverse",
+  "description": "Risk Averse Technology Company: open-source tools for AI agents.",
+  "owner": { "name": "Jaz", "email": "jaz@riskaversetechcompany.com", "url": "https://github.com/RiskAverseTech" },
+  "plugins": [
+    {
+      "name": "toolgate",
+      "source": "./plugin",
+      "description": "Tool-call firewall built on TypeSafe's Jev: seven risk questions, an action ledger, floors, ask-not-allow on failure. Needs the toolgate CLI (npm install -g @riskaverse/toolgate).",
+      "category": "security",
+      "tags": ["jev", "typesafe", "permissions", "auto-mode", "firewall"]
+    }
+  ]
+}

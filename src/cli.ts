@@ -4,7 +4,7 @@ import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { KEY_ENV_VARS, runHook, runPost, makeBackend, resolveProvider } from './hook.js';
+import { KEY_ENV_VARS, runDecide, runHook, runPost, makeBackend, resolveProvider } from './hook.js';
 import { runMcp } from './mcp.js';
 import { loadEnvFile, loadPolicy, policyPath } from './policy.js';
 import { decide } from './engine.js';
@@ -41,6 +41,14 @@ Usage:
       Installs PreToolUse (the gate) and PostToolUse/PostToolUseFailure/PermissionDenied (the
       action ledger: so a later "bash helper.sh" is judged as what helper.sh does).
 
+  toolgate decide [--policy <path>] [--backend ...]
+      Like hook, but prints the whole decision as JSON (verdict, reason, source, probabilities,
+      latencyMs), allow included. For hosts that act on the verdict themselves, e.g. the
+      Claude Code mod in plugin/. Same audit line and ledger proposal as hook.
+
+  toolgate version
+      Print the installed version.
+
   toolgate post
       Run as the PostToolUse / PostToolUseFailure / PermissionDenied hook: settles the ledger
       entry for the call. Silent, no model call, never fails.
@@ -69,6 +77,7 @@ function saveKeyFile(): string | undefined {
   return ENV_FILE;
 }
 
+const PACKAGE_VERSION: string = (JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8')) as { version: string }).version;
 const EXAMPLE_POLICY = join(dirname(fileURLToPath(import.meta.url)), '..', 'examples', 'toolgate.yaml');
 
 async function main(): Promise<void> {
@@ -118,6 +127,13 @@ async function main(): Promise<void> {
     case 'hook':
       if (process.stdin.isTTY) throw new Error(`hook expects PreToolUse JSON on stdin\n\n${HELP}`);
       return runHook({ policyPath: args.policy, backend: args.backend });
+
+    case 'decide':
+      if (process.stdin.isTTY) throw new Error(`decide expects PreToolUse JSON on stdin\n\n${HELP}`);
+      return runDecide({ policyPath: args.policy, backend: args.backend });
+
+    case 'version':
+      return console.log(PACKAGE_VERSION);
 
     case 'post':
       // PostToolUse / PostToolUseFailure / PermissionDenied: settle the ledger. Silent, never fails.

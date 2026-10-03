@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.16.0
+
+**The Claude Code mod.** toolgate ships as a Claude Code [mod](https://code.claude.com/docs/en/plugins/mods/create) in `plugin/`, installable from this repo's marketplace (`claude plugin marketplace add RiskAverseTech/toolgate && claude plugin install toolgate@riskaverse`). The engine stays in the CLI; the mod hooks `tool.check` for the verdict (allow runs, ask goes to the mode's decider, deny refuses with the reason) and `tool.call` afterwards to settle the action ledger, and adds `/toolgate` for the audit summary. Keys live in Claude Code's secure plugin settings; a `shadow` mode records without enforcing. If the CLI is missing the mod says so and steps aside, never more permissive than Claude Code alone. Nine hook tests under `claude plugin test` (`npm run test:mod`).
+
+- `toolgate decide`: like `hook`, prints the whole decision as JSON, allow included; same audit line and ledger proposal. For hosts that act on the verdict themselves.
+- `task_context` on the hook input: a host that already holds the transcript (the mod, library callers) supplies the current prompt, the earlier ones and the session goal directly; `transcript_path` is then not read. Same redaction and limits.
+- `toolgate version`.
+- `plugin/` is in the npm package, so `claude --plugin-dir $(npm root -g)/@riskaverse/toolgate/plugin` works without the marketplace.
+- vitest is scoped to `test/`; the mod's tests run against Claude Code's engine.
+
 ## Docs (git only, 2026-10-01)
 - README: Evaluation rewritten as a who-did-what paragraph plus a table of sets 2–8; a table of what `ask` means in each host; the intro cites the permissions/approval pattern in TypeSafe's public memo on a typesafe coding agent; the Roadmap replaced with a done-list and eight ranked next items drawn from the two outside code reviews, the three frozen-set runs, and the measurement window; a paragraph on how toolgate relates to LangChain's official Jev `AutoMode` middleware and to the "regex does this for free" argument (set 6 is the answer).
 

@@ -1,6 +1,6 @@
 {
   "name": "@riskaverse/toolgate",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "description": "Open auto mode for AI agents: a calibrated tool-call firewall powered by TypeSafe's Jev decision model (direct API, OpenRouter Decisions API, or Vercel AI Gateway). Ships as a Claude Code PreToolUse hook.",
   "keywords": [
     "agent-safety",
@@ -41,7 +41,8 @@
     "dist",
     "examples",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "plugin"
   ],
   "engines": {
     "node": ">=20"
@@ -52,7 +53,8 @@
     "check": "npm run build && vitest run",
     "smoke": "npm run build && bash scripts/smoke.sh",
     "release:verified": "npm run check && bash scripts/smoke.sh && npm publish",
-    "prepublishOnly": "npm run build && vitest run"
+    "prepublishOnly": "npm run build && vitest run",
+    "test:mod": "claude plugin validate ./plugin && claude plugin test ./plugin"
   },
   "dependencies": {
     "ai": "^7.0.0",

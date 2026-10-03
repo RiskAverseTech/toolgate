@@ -36,6 +36,18 @@ export interface HookInput {
   tool_use_id?: string;
   tool_name: string;
   tool_input: unknown;
+  /**
+   * The user's prompts, supplied directly by a host that already holds the transcript (the
+   * Claude Code mod, a library caller). When present, `transcript_path` is not read.
+   */
+  task_context?: TaskContext;
+}
+
+/** User prompts as a host supplies them: the current one, the ones before it (oldest first), the session's opening request. */
+export interface TaskContext {
+  current_task?: string;
+  earlier_prompts?: string[];
+  session_goal?: string;
 }
 
 export type DecisionAction = 'allow' | 'ask' | 'deny';

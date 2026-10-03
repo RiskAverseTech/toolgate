@@ -1,0 +1,4 @@
+{
+  "description": "toolgate: a Jev-backed tool-call firewall with an action ledger",
+  "modules": ["./register.ts"]
+}

@@ -8,3 +8,5 @@ dist/
 _to_delete/
 toolgate-transcripts/
 *.patch
+plugin/.claude-plugin/types/
+plugin/tsconfig.json

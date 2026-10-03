@@ -141,16 +141,7 @@ export async function runHook(opts: { policyPath?: string; backend?: string } = 
   loadEnvFile();
   let out: Record<string, unknown> | undefined;
   try {
-    const input = JSON.parse(await readStdin()) as HookInput;
-    if (typeof input?.tool_name !== 'string') throw new Error('stdin is not a PreToolUse payload');
-    const policy = loadPolicy(opts.policyPath);
-    const backend = makeBackend(policy, opts.backend);
-    const decision = await decide(input, policy, backend);
-    if (decision.source !== 'no-opinion') writeAudit(policy, input, decision, backend.name);
-    if (decision.source === 'fail-mode') process.stderr.write(`toolgate: ${decision.reason}\n`); // never silent
-    // Ledger: a write tool call is PROPOSED here (with what the content could do if executed) and
-    // becomes CONFIRMED when PostToolUse arrives for the same tool_use_id (`toolgate post`).
-    if (decision.verdict !== 'deny') recordProposed(policy, input, decision.capabilities, decision.capability_probs);
+    const { decision, policy } = await decideStdin(opts);
     out = toHookOutput(decision, { showAllows: policy.show_allows });
   } catch (err) {
     const why = message(err);
@@ -158,6 +149,41 @@ export async function runHook(opts: { policyPath?: string; backend?: string } = 
     out = toHookOutput({ verdict: 'ask', reason: `internal error (${why}) — confirm manually`, source: 'fail-mode' });
   }
   if (out) process.stdout.write(JSON.stringify(out));
+}
+
+/**
+ * `toolgate decide`: the same input and side effects as `hook` (audit line, ledger proposal), but
+ * the whole Decision as JSON on stdout, always — allow included. For hosts that act on the
+ * verdict themselves (the Claude Code mod, other harnesses) rather than reading PreToolUse output.
+ * An internal failure is a visible `ask` with `source: fail-mode`, never a silent allow.
+ */
+export async function runDecide(opts: { policyPath?: string; backend?: string } = {}): Promise<void> {
+  process.exitCode = 0;
+  loadEnvFile();
+  let decision: Decision;
+  try {
+    decision = (await decideStdin(opts)).decision;
+  } catch (err) {
+    const why = message(err);
+    process.stderr.write(`toolgate: ${why}\n`);
+    decision = { verdict: 'ask', reason: `internal error (${why}) — confirm manually`, source: 'fail-mode' };
+  }
+  process.stdout.write(JSON.stringify(decision));
+}
+
+/** Read a PreToolUse payload from stdin, decide it, audit it, and propose any write to the ledger. */
+async function decideStdin(opts: { policyPath?: string; backend?: string }): Promise<{ decision: Decision; policy: Policy }> {
+  const input = JSON.parse(await readStdin()) as HookInput;
+  if (typeof input?.tool_name !== 'string') throw new Error('stdin is not a PreToolUse payload');
+  const policy = loadPolicy(opts.policyPath);
+  const backend = makeBackend(policy, opts.backend);
+  const decision = await decide(input, policy, backend);
+  if (decision.source !== 'no-opinion') writeAudit(policy, input, decision, backend.name);
+  if (decision.source === 'fail-mode') process.stderr.write(`toolgate: ${decision.reason}\n`); // never silent
+  // Ledger: a write tool call is PROPOSED here (with what the content could do if executed) and
+  // becomes CONFIRMED when PostToolUse arrives for the same tool_use_id (`toolgate post`).
+  if (decision.verdict !== 'deny') recordProposed(policy, input, decision.capabilities, decision.capability_probs);
+  return { decision, policy };
 }
 
 /**

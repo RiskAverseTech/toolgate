@@ -1,0 +1,38 @@
+{
+  "name": "toolgate",
+  "displayName": "toolgate",
+  "version": "0.16.0",
+  "description": "Tool-call firewall for Claude Code built on TypeSafe's Jev: seven risk questions, an action ledger that judges files at write time, floors on the axes that must not soften, and ask instead of allow when the model is unreachable. Every verdict logged with its probabilities.",
+  "author": { "name": "Jaz", "email": "jaz@riskaversetechcompany.com", "url": "https://github.com/RiskAverseTech/toolgate" },
+  "homepage": "https://github.com/RiskAverseTech/toolgate",
+  "repository": "https://github.com/RiskAverseTech/toolgate",
+  "license": "MIT",
+  "keywords": ["jev", "typesafe", "permissions", "firewall", "auto-mode", "safety"],
+  "userConfig": {
+    "typesafe_api_key": {
+      "type": "string",
+      "title": "TypeSafe API key",
+      "description": "From console.typesafe.ai. Leave empty to use OpenRouter instead, or the key toolgate init saved in ~/.toolgate/env.",
+      "sensitive": true
+    },
+    "openrouter_api_key": {
+      "type": "string",
+      "title": "OpenRouter API key",
+      "description": "Jev via OpenRouter's Decisions API. Used when no TypeSafe key is set.",
+      "sensitive": true
+    },
+    "binary": {
+      "type": "string",
+      "title": "toolgate command",
+      "description": "The toolgate CLI (npm install -g @riskaverse/toolgate). A full path if Claude Code's PATH does not include your npm bin directory.",
+      "default": "toolgate"
+    },
+    "mode": {
+      "type": "string",
+      "title": "Mode",
+      "description": "enforce acts on toolgate's verdicts. shadow records every verdict in the audit log but changes nothing, for measuring before enabling.",
+      "options": ["enforce", "shadow"],
+      "default": "enforce"
+    }
+  }
+}

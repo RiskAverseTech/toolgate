@@ -2,7 +2,7 @@
 
 [![npm](https://img.shields.io/npm/v/@riskaverse/toolgate?label=npm)](https://www.npmjs.com/package/@riskaverse/toolgate) [![release](https://img.shields.io/github/v/release/RiskAverseTech/toolgate?include_prereleases&label=release)](https://github.com/RiskAverseTech/toolgate/releases) [![CI](https://github.com/RiskAverseTech/toolgate/actions/workflows/ci.yml/badge.svg)](https://github.com/RiskAverseTech/toolgate/actions/workflows/ci.yml) [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-**Open auto mode for AI agents.** A calibrated tool-call firewall that runs as a Claude Code `PreToolUse` hook or as an MCP proxy in front of any MCP server (Cursor, Claude Desktop, custom agents): before the agent runs a risky action, toolgate asks a decision model — [TypeSafe's Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev), through its API directly, via [OpenRouter's Decisions API](https://openrouter.ai/docs/api/api-reference/alphadecisions/submit-a-decisions-questions-and-answers-request), or via [Vercel AI Gateway](https://vercel.com/changelog/typesafe-ai-jev-now-available-on-ai-gateway) — seven questions and acts on the probabilities. It is the "permissions / approval" pattern TypeSafe's CEO describes in his [public memo on a typesafe coding agent](https://docs.google.com/document/d/1G61uUB0FifUnmmrPzFQojZ3KpczYKmXGpgEXDJ2l_Zg/) — programmable queries on what may run, and reading what a file does before executing it — built as a plugin to the agents people already use, and measured (see [Evaluation](#evaluation)):
+**Open auto mode for AI agents.** A calibrated tool-call firewall that runs as a Claude Code mod (or `PreToolUse` hook) or as an MCP proxy in front of any MCP server (Cursor, Claude Desktop, custom agents): before the agent runs a risky action, toolgate asks a decision model — [TypeSafe's Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev), through its API directly, via [OpenRouter's Decisions API](https://openrouter.ai/docs/api/api-reference/alphadecisions/submit-a-decisions-questions-and-answers-request), or via [Vercel AI Gateway](https://vercel.com/changelog/typesafe-ai-jev-now-available-on-ai-gateway) — seven questions and acts on the probabilities. It is the "permissions / approval" pattern TypeSafe's CEO describes in his [public memo on a typesafe coding agent](https://docs.google.com/document/d/1G61uUB0FifUnmmrPzFQojZ3KpczYKmXGpgEXDJ2l_Zg/) — programmable queries on what may run, and reading what a file does before executing it — built as a plugin to the agents people already use, and measured (see [Evaluation](#evaluation)):
 
 | Question | Catches things like |
 |---|---|
@@ -18,7 +18,7 @@
 
 Every closed-source harness ships a classifier like this. toolgate is that layer, opened up: policy in YAML, a real decision in about a second for a fraction of a cent, every verdict logged with its probabilities. Static rules and passthroughs cost ~90 ms and never load the AI SDK.
 
-It ships two ways: a **Claude Code `PreToolUse` hook**, and an **MCP proxy** that gates any MCP client (Cursor, Claude Desktop, your own agent). OpenAI/LangChain middleware is next.
+It ships three ways: a **Claude Code mod** (in-process, from a plugin marketplace, keys in secure settings), the original **Claude Code `PreToolUse` hook**, and an **MCP proxy** that gates any MCP client (Cursor, Claude Desktop, your own agent). OpenAI/LangChain middleware is next.
 
 ## Quickstart
 
@@ -35,6 +35,18 @@ Then quit and reopen Claude Code. That's it.
 Risky tool calls now get denied or bounced to a confirmation prompt, with the reason shown to you and, on a deny, to the model. Allowed calls stay quiet (`show_allows: true` to see them). If the model is ever unreachable, the hook says `[toolgate] NOT gating: …` rather than silently standing down.
 
 > ⛔ [toolgate] exfiltration risk 95% ≥ deny threshold 85%
+
+### As a Claude Code mod
+
+Claude Code v2.1.287 added [mods](https://code.claude.com/docs/en/plugins/mods/create): TypeScript plugins that run in-process and hook the engine's own events. toolgate ships as one in [`plugin/`](plugin/): the engine stays in the CLI, the mod is the wiring.
+
+```bash
+npm install -g @riskaverse/toolgate
+claude plugin marketplace add RiskAverseTech/toolgate
+claude plugin install toolgate@riskaverse
+```
+
+Claude Code asks for your TypeSafe or OpenRouter key when it enables the mod and keeps it in secure storage (or leave both empty to use the key `toolgate init` saved). The mod hooks `tool.check` for the verdict — **allow** runs the tool, **ask** goes to the mode's decider (the dialog, or the auto-mode classifier), **deny** refuses it with the reason the model reads — and `tool.call` afterwards to settle the action ledger, exactly as the hook pair does. Task context comes from the session's transcript rather than a file path. `/toolgate` shows the audit summary; a `shadow` mode records every verdict without enforcing, for measuring first. Run the mod or the hook, not both. Details and tests: [`plugin/README.md`](plugin/README.md).
 
 ## How it decides
 
@@ -215,7 +227,7 @@ These are small constructed sets targeting specific failure categories, not a ge
 
 ## Roadmap
 
-Done, in order: frozen-set evaluation (0.5), real-usage numbers and the fixes they forced (0.6), MCP proxy (0.7), `trusted_hosts` / `trusted_tools` (0.8–0.9.1), key-aware redaction and the deny floor (0.9.2), the action ledger (0.10), long-session context and `off_task` capped at ask (0.11), OpenRouter route (0.12), two proxy fail-open fixes from an outside code review (0.12.1 / 0.13.1), five more execution shapes and the unavailable-ledger floor (0.13), syntax checks as references and the ledger-aware exfiltration wording (0.14), `make` in the ledger (0.14.1), content is not action (0.15). Each one is validated on a frozen set or a measurement window, listed under Evaluation.
+Done, in order: frozen-set evaluation (0.5), real-usage numbers and the fixes they forced (0.6), MCP proxy (0.7), `trusted_hosts` / `trusted_tools` (0.8–0.9.1), key-aware redaction and the deny floor (0.9.2), the action ledger (0.10), long-session context and `off_task` capped at ask (0.11), OpenRouter route (0.12), two proxy fail-open fixes from an outside code review (0.12.1 / 0.13.1), five more execution shapes and the unavailable-ledger floor (0.13), syntax checks as references and the ledger-aware exfiltration wording (0.14), `make` in the ledger (0.14.1), content is not action (0.15), the Claude Code mod (0.16). Each one is validated on a frozen set or a measurement window, listed under Evaluation.
 
 Next, ranked by what the criticism and the data say matters most:
 
@@ -227,6 +239,8 @@ Next, ranked by what the criticism and the data say matters most:
 6. **Local backend** so nothing leaves the machine. The largest item and the one with no near path: it needs an on-device model that answers calibrated yes/no questions, and it must match the hosted model on the frozen sets before it ships, or fail-safe plus a miscalibrated local model is deny-spam that pushes people to `passthrough`.
 7. **MCP proxy depth** — task context and a ledger in proxy mode, which today is stricter and blinder than the hook.
 8. A read-only fast path (`ls`, `cat`, `git status` … with no pipes or redirects) so the model is consulted only when something could change.
+9. **Payload size versus latency.** Another Jev gate reports 164 ms medians sending about 550 tokens per check; toolgate's full state (task, earlier prompts, ledger facts, up to 40,000 characters of input) runs 350–800 ms. The context axes need the task; the question is what the rest costs. Measure on the frozen sets with trimmed state before changing anything.
+10. **Pi codemode.** Pi's codemode runs model-written scripts that call tools in sequence inside one turn, which is the write-then-run case compressed, and its extensions see each nested call. Several Jev gates for Pi exist already; the ledger inside a single script is the part none of them has. Backburnered until the mod has users.
 
 **How this relates to LangChain's Jev integration.** LangChain ships an official `AutoMode` middleware that does the same job — check each tool call with Jev, block the risky ones — for LangChain agents. toolgate is the same pattern for the hosts that middleware does not reach: Claude Code's `PreToolUse` hook and any MCP client through the proxy. On top of the pattern it adds YAML policy, the action ledger, and the published measurements above. And on the argument that a few lines of regex do this job for free: frozen set 6 is the direct test — a regex cannot tell a commit message that mentions `rm -rf` from running it, and the inert sides of that set score ≤ 0.32 while the action sides score 0.91–0.98.
 
