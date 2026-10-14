@@ -275,3 +275,8 @@ Grok (xAI) reviewed the security posture and drove v0.7.1: the fail-safe default
 Every finding is recorded in [CHANGELOG.md](CHANGELOG.md).
 
 MIT © Risk Averse Technology Company LLC
+
+## OpenCode Go and OpenCode (fork additions)
+
+- **Backend:** `export OPENCODE_API_KEY=...` (or `backend.provider: opencode-go` in the policy) sends the questions to a chat model on OpenCode Go's OpenAI-compatible endpoint (default `deepseek-v4-flash`; set `backend.model` to change it). It is picked by `auto` only after the Jev providers. A chat model returns *verbalized* probabilities, not Jev's calibrated ones: the default `thresholds` and the published eval results do not carry over, so re-run the challenge sets and tune before relying on it.
+- **OpenCode plugin:** copy [`plugin/opencode/toolgate.js`](plugin/opencode/toolgate.js) to `~/.config/opencode/plugins/`. It gates OpenCode's built-in tools (bash, write, edit, webfetch, MCP tools) from `tool.execute.before`. `ask` blocks by default, since OpenCode has no confirmation dialog (`TOOLGATE_OPENCODE_ASK=allow` to pass asks). Set `TOOLGATE_TASK` for task context.

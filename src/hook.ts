@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { Answers, Decision, DecisionBackend, HookInput, JSONObject, Policy, Questions } from './types.js';
 import { loadEnvFile, loadPolicy } from './policy.js';
 import { decide, message } from './engine.js';
@@ -27,17 +28,18 @@ class LazyGatewayBackend implements DecisionBackend {
 }
 
 /** Which real backend `auto` resolves to, from the environment. */
-export type Provider = 'typesafe' | 'openrouter' | 'gateway' | 'mock';
+export type Provider = 'typesafe' | 'openrouter' | 'gateway' | 'opencode-zen' | 'opencode-go' | 'mock';
 
-/** Key precedence for `auto`: TypeSafe direct, then OpenRouter, then Vercel AI Gateway. */
-export const KEY_ENV_VARS = ['TYPESAFE_API_KEY', 'OPENROUTER_API_KEY', 'AI_GATEWAY_API_KEY'] as const;
+/** Key precedence for `auto`: TypeSafe direct, then OpenRouter, then Vercel AI Gateway, then OpenCode Go. */
+export const KEY_ENV_VARS = ['TYPESAFE_API_KEY', 'OPENROUTER_API_KEY', 'AI_GATEWAY_API_KEY', 'OPENCODE_API_KEY'] as const;
 
 export function resolveProvider(provider: string): Provider {
   if (provider !== 'auto') return provider as Provider;
   if (process.env.TYPESAFE_API_KEY) return 'typesafe';
   if (process.env.OPENROUTER_API_KEY) return 'openrouter';
   if (process.env.AI_GATEWAY_API_KEY) return 'gateway';
-  throw new Error('no API key found: set TYPESAFE_API_KEY (console.typesafe.ai), OPENROUTER_API_KEY (openrouter.ai/keys) or AI_GATEWAY_API_KEY (vercel.com/<team>/~/ai)');
+  if (process.env.OPENCODE_API_KEY) return 'opencode-zen';
+  throw new Error('no API key found: set TYPESAFE_API_KEY (console.typesafe.ai), OPENROUTER_API_KEY (openrouter.ai/keys) or AI_GATEWAY_API_KEY (vercel.com/<team>/~/ai) or OPENCODE_API_KEY (opencode.ai)');
 }
 
 /**
@@ -67,7 +69,9 @@ export function makeBackend(policy: Policy, override?: string): DecisionBackend 
   if (provider === 'gateway') return new LazyGatewayBackend(model ?? 'typesafe-ai/jev');
   if (provider === 'typesafe') return new LazyTypeSafeBackend(model ?? 'jev-latest');
   if (provider === 'openrouter') return new LazyOpenRouterBackend(model ?? 'typesafe/jev-1.13');
-  throw new Error(`unknown backend "${provider}" (expected auto | typesafe | openrouter | gateway | mock)`);
+  if (provider === 'opencode-zen') return new LazyOpenCodeZenBackend(model ?? 'jev-1.13-free');
+  if (provider === 'opencode-go') return new LazyOpenCodeGoBackend(model ?? 'deepseek-v4-flash');
+  throw new Error(`unknown backend "${provider}" (expected auto | typesafe | openrouter | gateway | opencode-zen | opencode-go | mock)`);
 }
 
 class LazyOpenRouterBackend implements DecisionBackend {
@@ -79,6 +83,39 @@ class LazyOpenRouterBackend implements DecisionBackend {
   async warm(): Promise<void> {
     const { OpenRouterBackend } = await import('./backends/openrouter.js');
     this.inner ??= new OpenRouterBackend(this.model);
+  }
+  async evaluate(state: JSONObject, questions: Questions, opts?: { timeoutMs?: number }): Promise<Answers> {
+    await this.warm();
+    return this.inner!.evaluate(state, questions, opts);
+  }
+}
+
+/** Jev through OpenCode Zen's TypeSafe-compatible /systemone route: same API as TypeSafe direct, billed to the OpenCode account. */
+class LazyOpenCodeZenBackend implements DecisionBackend {
+  readonly name: string;
+  private inner?: DecisionBackend;
+  constructor(private readonly model: string) {
+    this.name = `opencode-zen:${model}`;
+  }
+  async warm(): Promise<void> {
+    const { TypeSafeBackend } = await import('./backends/typesafe.js');
+    this.inner ??= new TypeSafeBackend(this.model, process.env.OPENCODE_API_KEY, 'https://opencode.ai/zen/v1/systemone', { 'x-opencode-session': randomUUID() }, 'opencode-zen');
+  }
+  async evaluate(state: JSONObject, questions: Questions, opts?: { timeoutMs?: number }): Promise<Answers> {
+    await this.warm();
+    return this.inner!.evaluate(state, questions, opts);
+  }
+}
+
+class LazyOpenCodeGoBackend implements DecisionBackend {
+  readonly name: string;
+  private inner?: DecisionBackend;
+  constructor(private readonly model: string) {
+    this.name = `opencode-go:${model}`;
+  }
+  async warm(): Promise<void> {
+    const { OpenCodeGoBackend } = await import('./backends/opencode-go.js');
+    this.inner ??= new OpenCodeGoBackend(this.model);
   }
   async evaluate(state: JSONObject, questions: Questions, opts?: { timeoutMs?: number }): Promise<Answers> {
     await this.warm();

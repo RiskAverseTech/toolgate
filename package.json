@@ -44,6 +44,7 @@
     "LICENSE",
     "plugin/.claude-plugin",
     "plugin/hooks",
+    "plugin/opencode",
     "plugin/README.md"
   ],
   "engines": {
