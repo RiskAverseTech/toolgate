@@ -13,8 +13,10 @@ export class TypeSafeBackend implements DecisionBackend {
     private readonly model = 'jev-latest',
     private readonly apiKey = process.env.TYPESAFE_API_KEY,
     private readonly endpoint = 'https://api.typesafe.ai/v1/systemone',
+    private readonly extraHeaders: Record<string, string> = {},
+    label = 'typesafe',
   ) {
-    this.name = `typesafe:${model}`;
+    this.name = `${label}:${model}`;
   }
 
   async evaluate(state: JSONObject, questions: Questions, opts?: { timeoutMs?: number }): Promise<Answers> {
@@ -25,7 +27,7 @@ export class TypeSafeBackend implements DecisionBackend {
     try {
       const res = await fetch(this.endpoint, {
         method: 'POST',
-        headers: { authorization: `Bearer ${this.apiKey}`, 'content-type': 'application/json' },
+        headers: { authorization: `Bearer ${this.apiKey}`, 'content-type': 'application/json', ...this.extraHeaders },
         body: JSON.stringify({ model: this.model, state, questions: toNoul(questions) }),
         signal: controller.signal,
       });
