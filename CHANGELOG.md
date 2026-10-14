@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **OpenCode Zen provider (`opencode-zen`).** Jev through OpenCode Zen's TypeSafe-compatible `/zen/v1/systemone` route, authenticated with `OPENCODE_API_KEY` (default model `jev-1.13-free`; `jev-1.13` is the paid one). `auto` picks it after TypeSafe, OpenRouter and Vercel AI Gateway, so existing setups resolve as before. `TypeSafeBackend` takes optional extra headers (Zen requires `x-opencode-session`) and a label.
+
 ## 0.17.0 — what the second measurement window asked for
 
 Every change here comes from `docs/usage-2026-10-11.md` (1,633 decisions on 0.16.0, blind second labeling of 407 items). Replayed against that window with the recorded probabilities, the engine changes move it from **ask 15.6% to 8.6%** (allow 84.3% → 91.2%, denies unchanged at 3), with no allow becoming an ask. The replay cannot re-score the calls that were judged against a compaction summary, so the real number comes from the third window.
