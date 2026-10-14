@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **OpenCode Zen provider (`opencode-zen`).** Jev through OpenCode Zen's TypeSafe-compatible `/zen/v1/systemone` route, authenticated with `OPENCODE_API_KEY` (default model `jev-1.13-free`; `jev-1.13` is the paid one). `auto` picks it after TypeSafe, OpenRouter and Vercel AI Gateway, so existing setups resolve as before. `TypeSafeBackend` takes optional extra headers (Zen requires `x-opencode-session`) and a label.
+
 ## 0.17.1 — what the third window asked for
 
 `docs/usage-2026-10-15.md`: the first window cut by host from the log itself. 0.17.0, Oct 13, 318 decisions: ask 13.8% (20.9% → 15.6% → 13.8%), one deny, zero permissive misses on the author's pass. The three days around it run 17.5%. What 0.17.0 fixed is verified (the truncation floor fired once instead of 82 times, the read-only waiver 11 times, the confirmation memory once); what remains is the model's own `off_task` on investigative writes against reaction prompts, and exfiltration asks on the author's own services with `trusted_hosts` still empty.
