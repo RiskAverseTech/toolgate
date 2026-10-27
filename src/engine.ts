@@ -1,5 +1,5 @@
 import type { Answers, ArtifactCapabilities, Decision, DecisionBackend, HookInput, JSONObject, Policy, Questions, StaticRule } from './types.js';
-import { ASK_CEILING, CAPABILITY_KEYS, CAPABILITY_QUESTIONS, CONTEXT_QUESTIONS, UNSOFTENABLE, WRITE_TOOLS, toolMatcherToRegex } from './policy.js';
+import { ASK_CEILING, CAPABILITY_AXES, CAPABILITY_KEYS, CAPABILITY_QUESTIONS, CONTEXT_QUESTIONS, UNSOFTENABLE, WRITE_TOOLS, toolMatcherToRegex } from './policy.js';
 import { buildState, isTruncated, matchText } from './state.js';
 import { compositionFacts, executeShaped, ledgerUnavailable } from './ledger.js';
 import { isReadOnlyBash } from './readonly.js';
@@ -173,6 +173,13 @@ export async function decide(input: HookInput, policy: Policy, backend: Decision
   const levelOf = (p: number): 0 | 1 | 2 => (p >= deny ? 2 : p >= ask ? 1 : 0);
   // Off-task on a read is noise, not a reason to interrupt (0.17.0; from the 0.16.0 window).
   const readOnly = isReadOnlyCall(input, policy);
+  // The general form of the same rule (0.18.0; from the third window, two blind labelings and a
+  // replay): off-task is a reason for a human when the call could change something, and the
+  // model's own capability axes say whether it could. `off_task` alone raises an ask only when
+  // the highest capability axis is at or above `thresholds.off_task_capability`. The cost, on the
+  // record: an off-task call that spends money has no capability axis and passes.
+  const capabilityMax = Math.max(0, ...CAPABILITY_AXES.map((k) => answers[k]?.probability ?? 0));
+  const offTaskInert = !readOnly && capabilityMax < policy.thresholds.off_task_capability;
   let offTaskWaived: number | undefined;
   let worst = { key: 'none', p: 0, level: 0 as 0 | 1 | 2, softened: false };
   let reservedAxis: { key: string; p: number } | undefined; // a deny the reserved choice turned into an ask
@@ -186,7 +193,7 @@ export async function decide(input: HookInput, policy: Policy, backend: Decision
       level = 1;
       if (!reservedAxis || p > reservedAxis.p) reservedAxis = { key, p };
     }
-    if (key === 'off_task' && readOnly && level > 0) {
+    if (key === 'off_task' && (readOnly || offTaskInert) && level > 0) {
       level = 0;
       offTaskWaived = p;
     }
@@ -206,7 +213,11 @@ export async function decide(input: HookInput, policy: Policy, backend: Decision
   if (reservedAxis && verdict === 'ask') {
     reason += `; ${reservedAxis.key.replace(/_/g, ' ')} ${pct(reservedAxis.p)} would deny, but the task reserves this choice for you (${pct(reservedP!)})`;
   }
-  if (offTaskWaived !== undefined && verdict === 'allow') reason += `; off task ${pct(offTaskWaived)} not raised alone on a read-only call`;
+  if (offTaskWaived !== undefined && verdict === 'allow') {
+    reason += readOnly
+      ? `; off task ${pct(offTaskWaived)} not raised alone on a read-only call`
+      : `; off task ${pct(offTaskWaived)} not raised alone (no capability axis at or above ${pct(policy.thresholds.off_task_capability)})`;
+  }
   // Confirmation memory: the person already said yes to this exact call this session. Lifts the
   // model's own ask only; the floors below still apply, and a deny is never lifted.
   let source: Decision['source'] = 'model';

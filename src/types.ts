@@ -89,11 +89,26 @@ export interface StaticRule {
 
 export interface Policy {
   /** auto = typesafe if TYPESAFE_API_KEY is set, else openrouter if OPENROUTER_API_KEY is set, else gateway if AI_GATEWAY_API_KEY is set, else opencode-zen (Jev) if OPENCODE_API_KEY is set. */
-  backend: { provider: 'auto' | 'typesafe' | 'openrouter' | 'gateway' | 'opencode-zen' | 'mock'; model: string; timeout_ms: number };
+  backend: {
+    provider: 'auto' | 'typesafe' | 'openrouter' | 'gateway' | 'opencode-zen' | 'local' | 'mock';
+    model: string;
+    timeout_ms: number;
+    /**
+     * `local` only: a server on this machine that speaks the `/v1/systemone` wire format (the open
+     * decision models that copy it: Von, Kev, Laya). Default http://127.0.0.1:8000/v1/systemone.
+     * Nothing leaves the machine. Unscored until it has been run on the frozen sets; see README.
+     */
+    endpoint?: string;
+  };
   /** What to do when the decision model errors or times out. */
   fail_mode: 'passthrough' | 'ask' | 'deny';
-  /** authorized: P(task calls for this action) at/above which risk is softened one step. */
-  thresholds: { deny: number; ask: number; authorized: number };
+  /**
+   * authorized: P(task calls for this action) at/above which risk is softened one step.
+   * off_task_capability: `off_task` alone raises an ask only when some capability axis (destructive,
+   * exfiltration, privilege, secret_exposure) is at least this. Being off-task is a reason for a
+   * human when the call could change something; 0 restores the pre-0.18 behaviour (always ask).
+   */
+  thresholds: { deny: number; ask: number; authorized: number; off_task_capability: number };
   /** Built-in static rules (the floor). Evaluation order: built-in denies, then `user_rules`, then the remaining built-ins. */
   rules: StaticRule[];
   /** Rules from the policy file. They can override a built-in `ask`, never a built-in `deny`. */

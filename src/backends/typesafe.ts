@@ -27,7 +27,8 @@ export class TypeSafeBackend implements DecisionBackend {
     try {
       const res = await fetch(this.endpoint, {
         method: 'POST',
-        headers: { authorization: `Bearer ${this.apiKey}`, 'content-type': 'application/json', ...this.extraHeaders },
+        // Extra headers first: the fixed ones win, so a route-specific header can never replace the auth header.
+        headers: { ...this.extraHeaders, authorization: `Bearer ${this.apiKey}`, 'content-type': 'application/json' },
         body: JSON.stringify({ model: this.model, state, questions: toNoul(questions) }),
         signal: controller.signal,
       });

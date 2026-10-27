@@ -788,8 +788,9 @@ describe('reserved-choice guard (0.6.3): a reservation only covers the action it
     // not lower it, and the 0.11 ask ceiling means it lands at ask rather than deny.
     const d = await taskCmd({ off_task: 0.9, unresolved_choice: 0.95, destructive: 0.01, violates_constraint: 0.01 });
     expect(d.verdict).toBe('ask');
-    // and with unresolved_choice quiet, the off_task ceiling is what holds it at ask
-    const alone = await taskCmd({ off_task: 0.95, unresolved_choice: 0.05, destructive: 0.01, violates_constraint: 0.01 });
+    // and with unresolved_choice quiet, the off_task ceiling is what holds it at ask (a capability
+    // axis at 0.45 so the 0.18 off_task_capability rule does not waive it; see its own block below)
+    const alone = await taskCmd({ off_task: 0.95, unresolved_choice: 0.05, destructive: 0.45, violates_constraint: 0.01 });
     expect(alone.verdict).toBe('ask');
     expect(alone.reason).toMatch(/off task/);
   });
@@ -875,9 +876,10 @@ describe('read-only calls: off_task alone does not interrupt (0.17)', () => {
     expect(d.verdict).toBe('allow');
     expect(d.reason).toMatch(/not raised alone on a read-only call/);
   });
-  it('a Bash command that writes is still asked on off_task', async () => {
-    const d = await decide(bashWithTask('grep -n foo src/*.ts > out.txt', 'write the release notes'), defaultPolicy(), new StubBackend(offTask));
+  it('a Bash command that writes is still asked on off_task (with a capability axis in the 0.18 band)', async () => {
+    const d = await decide(bashWithTask('grep -n foo src/*.ts > out.txt', 'write the release notes'), defaultPolicy(), new StubBackend({ ...offTask, destructive: 0.45 }));
     expect(d.verdict).toBe('ask');
+    expect(d.reason).toMatch(/off task/);
   });
   it('a read-only tool (WebSearch, a browser page read) is allowed on off_task alone', async () => {
     for (const tool of ['WebSearch', 'WebFetch', 'mcp__Claude_Browser__navigate', 'mcp__Claude_Browser__get_page_text', 'mcp__brave__brave_web_search']) {
@@ -893,8 +895,57 @@ describe('read-only calls: off_task alone does not interrupt (0.17)', () => {
   });
   it('a browser action that clicks is not read-only', async () => {
     const input: HookInput = { ...bashWithTask('x', 'write the release notes'), tool_name: 'mcp__Claude_Browser__javascript_tool', tool_input: { text: 'document.querySelector("button").click()' } };
-    const d = await decide(input, defaultPolicy(), new StubBackend(offTask));
+    const d = await decide(input, defaultPolicy(), new StubBackend({ ...offTask, destructive: 0.45 }));
     expect(d.verdict).toBe('ask');
+    expect(d.readOnly).toBeUndefined();
+  });
+});
+
+describe('off_task alone asks only with a capability axis at or above thresholds.off_task_capability (0.18)', () => {
+  const write = (probs: Record<string, number>, policy = defaultPolicy()) =>
+    decide(bashWithTask('cat > scratch/analyze.py <<EOF\nprint(1)\nEOF\npython3 scratch/analyze.py', 'hmm, not sure that is worth it'), policy, new StubBackend(probs));
+  it('a write with off_task high and every capability axis quiet is allowed, and the reason says why', async () => {
+    const d = await write({ off_task: 0.8, destructive: 0.2, exfiltration: 0.1 });
+    expect(d.verdict).toBe('allow');
+    expect(d.reason).toMatch(/off task 80% not raised alone \(no capability axis at or above 40%\)/);
+    expect(d.probabilities?.off_task).toBe(0.8); // the recorded probability is untouched
+  });
+  it('the same call with a capability axis at the line asks on off_task', async () => {
+    for (const axis of ['destructive', 'exfiltration', 'privilege', 'secret_exposure']) {
+      const d = await write({ off_task: 0.8, [axis]: 0.4 });
+      expect(d.verdict, axis).toBe('ask');
+      expect(d.reason, axis).toMatch(/^off task risk 80%/);
+    }
+  });
+  it('just under the line is allowed; the context axes do not count as capability', async () => {
+    expect((await write({ off_task: 0.8, destructive: 0.39 })).verdict).toBe('allow');
+    expect((await write({ off_task: 0.8, violates_constraint: 0.5, unresolved_choice: 0.5 })).verdict).toBe('allow');
+  });
+  it('a capability axis over the ask line is judged on its own, as before', async () => {
+    const d = await write({ off_task: 0.8, exfiltration: 0.6 });
+    expect(d.verdict).toBe('ask');
+    expect(d.reason).toMatch(/^off task risk 80%/); // the strictest axis wins; both are at ask level and off_task is higher
+    const e = await write({ off_task: 0.3, exfiltration: 0.6 });
+    expect(e.verdict).toBe('ask');
+    expect(e.reason).toMatch(/^exfiltration risk 60%/);
+  });
+  it('off_task at deny level still lands at ask, never deny, when a capability axis is present', async () => {
+    const d = await write({ off_task: 0.95, destructive: 0.5 });
+    expect(d.verdict).toBe('ask');
+  });
+  it('thresholds.off_task_capability: 0 restores the pre-0.18 behaviour', async () => {
+    const p = defaultPolicy();
+    p.thresholds.off_task_capability = 0;
+    const d = await write({ off_task: 0.8 }, p);
+    expect(d.verdict).toBe('ask');
+    expect(d.reason).toMatch(/^off task risk 80%/);
+  });
+  it('the rule never lifts a floor: truncated input stays an ask', async () => {
+    const p = defaultPolicy();
+    const big = 'x'.repeat(p.limits.input_chars + 10);
+    const d = await decide(bashWithTask(`echo ${big} > f`, 'hmm'), p, new StubBackend({ off_task: 0.8 }));
+    expect(d.verdict).toBe('ask');
+    expect(d.reason).toMatch(/input too large/);
   });
 });
 

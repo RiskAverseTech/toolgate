@@ -139,6 +139,14 @@ export const UNSOFTENABLE = new Set(['secret_exposure', 'violates_constraint', '
 export const ASK_CEILING = new Set(['unresolved_choice', 'off_task']);
 
 /**
+ * The axes that say a call could change something: what a human is for when the agent is off
+ * task. `off_task` alone raises an ask only when one of these is at or above
+ * `thresholds.off_task_capability` (0.18.0). The context axes (violates_constraint,
+ * unresolved_choice) keep their own verdicts and are not capability.
+ */
+export const CAPABILITY_AXES = ['destructive', 'exfiltration', 'privilege', 'secret_exposure'] as const;
+
+/**
  * Built-in static rules. Matched against the tool input's text with quotes and
  * backslashes stripped (see state.ts matchText), so patterns are written for the
  * raw command, not JSON. Every quantifier is bounded or unambiguous, and the rm
@@ -189,7 +197,7 @@ export function defaultPolicy(): Policy {
   return {
     backend: { provider: 'auto', model: 'auto', timeout_ms: 5000 },
     fail_mode: 'ask',
-    thresholds: { deny: 0.85, ask: 0.55, authorized: 0.8 },
+    thresholds: { deny: 0.85, ask: 0.55, authorized: 0.8, off_task_capability: 0.4 },
     rules: [...DEFAULT_RULES],
     user_rules: [],
     gated_tools: 'Bash|Write|Edit|MultiEdit|NotebookEdit|WebFetch|WebSearch|mcp__.*',
@@ -277,12 +285,17 @@ export function validatePolicy(p: Policy): void {
   const fail = (msg: string): never => {
     throw new Error(`toolgate policy: ${msg}`);
   };
-  if (!['auto', 'typesafe', 'openrouter', 'gateway', 'opencode-zen', 'mock'].includes(p.backend.provider)) fail(`unknown backend.provider "${p.backend.provider}"`);
+  if (!['auto', 'typesafe', 'openrouter', 'gateway', 'opencode-zen', 'local', 'mock'].includes(p.backend.provider)) fail(`unknown backend.provider "${p.backend.provider}"`);
+  if (p.backend.endpoint !== undefined) {
+    if (typeof p.backend.endpoint !== 'string' || !/^https?:\/\//.test(p.backend.endpoint)) fail('backend.endpoint must be an http(s) URL');
+    if (p.backend.provider !== 'local') fail('backend.endpoint applies to provider: local only');
+  }
   if (!(Number.isFinite(p.backend.timeout_ms) && p.backend.timeout_ms > 0)) fail('backend.timeout_ms must be > 0');
   if (!['passthrough', 'ask', 'deny'].includes(p.fail_mode)) fail(`invalid fail_mode "${p.fail_mode}"`);
-  const { deny, ask, authorized } = p.thresholds;
+  const { deny, ask, authorized, off_task_capability } = p.thresholds;
   if (!(ask >= 0 && ask <= deny && deny <= 1)) fail('thresholds must satisfy 0 <= ask <= deny <= 1');
   if (!(authorized >= 0 && authorized <= 1)) fail('thresholds.authorized must be in [0, 1]');
+  if (!(typeof off_task_capability === 'number' && off_task_capability >= 0 && off_task_capability <= 1)) fail('thresholds.off_task_capability must be in [0, 1] (0 = off_task alone always asks)');
   if (typeof p.gated_tools !== 'string' || !p.gated_tools) fail('gated_tools must be a non-empty string');
   if (!Array.isArray(p.trusted_hosts) || !p.trusted_hosts.every((h) => typeof h === 'string')) fail('trusted_hosts must be a list of strings');
   for (const h of p.trusted_hosts) {

@@ -31,7 +31,10 @@ class LazyGatewayBackend implements DecisionBackend {
 export const DEFAULT_JEV_MODEL = 'jev-1.13.0';
 
 /** Which real backend `auto` resolves to, from the environment. */
-export type Provider = 'typesafe' | 'openrouter' | 'gateway' | 'opencode-zen' | 'mock';
+export type Provider = 'typesafe' | 'openrouter' | 'gateway' | 'opencode-zen' | 'local' | 'mock';
+
+/** Where a `local` decision server listens by default (Von's `von serve`, Kev's server, and the like). */
+export const DEFAULT_LOCAL_ENDPOINT = 'http://127.0.0.1:8000/v1/systemone';
 
 /** Key precedence for `auto`: TypeSafe direct, then OpenRouter, then Vercel AI Gateway, then OpenCode Zen. */
 export const KEY_ENV_VARS = ['TYPESAFE_API_KEY', 'OPENROUTER_API_KEY', 'AI_GATEWAY_API_KEY', 'OPENCODE_API_KEY'] as const;
@@ -75,7 +78,10 @@ export function makeBackend(policy: Policy, override?: string): DecisionBackend 
   if (provider === 'typesafe') return new LazyTypeSafeBackend(model ?? DEFAULT_JEV_MODEL);
   if (provider === 'openrouter') return new LazyOpenRouterBackend(model ?? 'typesafe/jev-1.13');
   if (provider === 'opencode-zen') return new LazyOpenCodeZenBackend(model ?? 'jev-1.13-free');
-  throw new Error(`unknown backend "${provider}" (expected auto | typesafe | openrouter | gateway | opencode-zen | mock)`);
+  // `local` is explicit only: `auto` never picks it, because nothing should silently decide on a
+  // model that has not been scored on the frozen sets.
+  if (provider === 'local') return new LazyLocalBackend(model ?? 'local', policy.backend.endpoint ?? DEFAULT_LOCAL_ENDPOINT);
+  throw new Error(`unknown backend "${provider}" (expected auto | typesafe | openrouter | gateway | opencode-zen | local | mock)`);
 }
 
 class LazyOpenRouterBackend implements DecisionBackend {
@@ -104,6 +110,23 @@ class LazyOpenCodeZenBackend implements DecisionBackend {
   async warm(): Promise<void> {
     const { TypeSafeBackend } = await import('./backends/typesafe.js');
     this.inner ??= new TypeSafeBackend(this.model, process.env.OPENCODE_API_KEY, 'https://opencode.ai/zen/v1/systemone', { 'x-opencode-session': randomUUID() }, 'opencode-zen');
+  }
+  async evaluate(state: JSONObject, questions: Questions, opts?: { timeoutMs?: number }): Promise<Answers> {
+    await this.warm();
+    return this.inner!.evaluate(state, questions, opts);
+  }
+}
+
+/** A decision server on this machine speaking the /v1/systemone wire format. Same request shape as TypeSafe direct; no key needed (TOOLGATE_LOCAL_API_KEY if the server wants one). */
+class LazyLocalBackend implements DecisionBackend {
+  readonly name: string;
+  private inner?: DecisionBackend;
+  constructor(private readonly model: string, private readonly endpoint: string) {
+    this.name = `local:${model}`;
+  }
+  async warm(): Promise<void> {
+    const { TypeSafeBackend } = await import('./backends/typesafe.js');
+    this.inner ??= new TypeSafeBackend(this.model, process.env.TOOLGATE_LOCAL_API_KEY ?? 'local', this.endpoint, {}, 'local');
   }
   async evaluate(state: JSONObject, questions: Questions, opts?: { timeoutMs?: number }): Promise<Answers> {
     await this.warm();

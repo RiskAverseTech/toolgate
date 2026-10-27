@@ -14,10 +14,10 @@ import type { HookInput } from './types.js';
 const HELP = `toolgate — a calibrated tool-call firewall for AI agents
 
 Usage:
-  toolgate hook [--policy <path>] [--backend typesafe|openrouter|gateway|opencode-zen|mock]
+  toolgate hook [--policy <path>] [--backend typesafe|openrouter|gateway|opencode-zen|local|mock]
       Run as a Claude Code PreToolUse hook (JSON in on stdin).
 
-  toolgate check --tool <name> --input=<json|string> [--task <text>]... [--backend typesafe|openrouter|gateway|opencode-zen|mock]
+  toolgate check --tool <name> --input=<json|string> [--task <text>]... [--backend typesafe|openrouter|gateway|opencode-zen|local|mock]
       Dry-run a tool call against the policy and print the decision and the exact state sent.
       --task supplies user prompts (repeatable, oldest first; the last is the current task)
       so the context questions are asked.
@@ -65,6 +65,7 @@ Environment (one key is enough; precedence TYPESAFE > OPENROUTER > AI_GATEWAY > 
   OPENROUTER_API_KEY   OpenRouter key (openrouter.ai/keys) — Jev via the Decisions API
   AI_GATEWAY_API_KEY   Vercel AI Gateway key (vercel.com/<team>/~/ai)
   OPENCODE_API_KEY     OpenCode Zen key (opencode.ai) — Jev via Zen's TypeSafe-compatible route
+  (provider: local)    a /v1/systemone server on this machine (backend.endpoint, default http://127.0.0.1:8000/v1/systemone); never chosen by auto
   TOOLGATE_POLICY      Policy file path (default ~/.toolgate/toolgate.yaml)
 `;
 

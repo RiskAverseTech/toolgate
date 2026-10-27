@@ -3,9 +3,12 @@
 # project directories, so a cloned repo can't reconfigure the firewall.
 
 backend:
-  provider: auto           # auto | typesafe | openrouter | gateway | mock
-                           # auto = typesafe if TYPESAFE_API_KEY is set, else openrouter if OPENROUTER_API_KEY is set, else gateway if AI_GATEWAY_API_KEY is set
-  model: auto              # auto = jev-1.13.0 (typesafe, pinned: the version the published numbers were measured on) / typesafe/jev-1.13 (openrouter) / typesafe-ai/jev (gateway)
+  provider: auto           # auto | typesafe | openrouter | gateway | opencode-zen | local | mock
+                           # auto = typesafe if TYPESAFE_API_KEY is set, else openrouter (OPENROUTER_API_KEY), else gateway (AI_GATEWAY_API_KEY), else opencode-zen (OPENCODE_API_KEY)
+  model: auto              # auto = jev-1.13.0 (typesafe, pinned: the version the published numbers were measured on) / typesafe/jev-1.13 (openrouter) / typesafe-ai/jev (gateway) / jev-1.13-free (opencode-zen)
+  # endpoint: http://127.0.0.1:8000/v1/systemone
+                           # local only (0.18, experimental): a /v1/systemone-compatible server on this machine. Nothing leaves
+                           # the machine; nothing is scored yet either. TOOLGATE_LOCAL_API_KEY if the server wants a key.
   timeout_ms: 5000         # observed ~1 s per call via the Gateway; first call can be slower
 
 # When the decision model is unreachable (static rules still run first either way):
@@ -19,6 +22,10 @@ thresholds:
   ask: 0.55                # prompt at/above this risk probability
   authorized: 0.8          # if P(task calls for this action) is at/above this, soften one step (deny→ask, ask→allow).
                            # Live data: explicit requests score 0.84–0.89, unrelated ones 0.03–0.18 (docs/live-results-*).
+  off_task_capability: 0.4 # off_task alone raises an ask only when a capability axis (destructive, exfiltration, privilege,
+                           # secret_exposure) is at/above this (0.18). Off-task is a reason for a human when the call could
+                           # change something. 0 = always ask on off_task (pre-0.18). Cost: an off-task call that spends
+                           # money has no capability axis and passes; docs/usage-2026-10-15.md.
 
 # Tools the model evaluates (whole-name match; exact, a|b list, or regex).
 gated_tools: "Bash|Write|Edit|MultiEdit|NotebookEdit|WebFetch|WebSearch|mcp__.*"

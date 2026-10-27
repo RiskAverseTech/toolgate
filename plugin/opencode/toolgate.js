@@ -10,8 +10,14 @@
 //
 // Throwing from tool.execute.before blocks the call. OpenCode plugins have no
 // confirmation dialog, so `ask` blocks by default; set TOOLGATE_OPENCODE_ASK=allow
-// to let asks through. A toolgate failure (binary missing, model unreachable) follows
-// the same rule: fail safe unless you opt out.
+// to let asks through. A toolgate failure (binary missing, model unreachable) ALWAYS
+// blocks, whatever TOOLGATE_OPENCODE_ASK says: toolgate never allows on its own failure,
+// in any host.
+//
+// This hook calls `toolgate check`, which carries no session id and no task context: no
+// action ledger, no `authorized` softening, and the four context questions are skipped.
+// It is therefore stricter and blinder than the Claude Code mod, like the MCP proxy.
+// TOOLGATE_TASK=<text> supplies a task for the context questions if you want them.
 import { execFile } from 'node:child_process';
 
 const READ_ONLY = new Set(['read', 'glob', 'grep', 'list', 'todoread', 'todowrite', 'skill']);
@@ -53,7 +59,7 @@ export default {
         try {
           decision = await check(tool, toToolgateInput(input.tool, output.args), directory);
         } catch (err) {
-          if (askAllowed) return;
+          // Fail safe, no opt-out: a gate that allows when its checker is down is the state an attacker wants.
           throw new Error(`[toolgate] NOT gating, blocked fail-safe: ${err instanceof Error ? err.message : err}`);
         }
         if (decision.verdict === 'deny' || (decision.verdict === 'ask' && !askAllowed)) {

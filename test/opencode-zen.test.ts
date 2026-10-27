@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TypeSafeBackend } from '../src/backends/typesafe.js';
 import { makeBackend, resolveProvider } from '../src/hook.js';
-import { defaultPolicy } from '../src/policy.js';
+import { defaultPolicy, validatePolicy } from '../src/policy.js';
 
 describe('OpenCode Zen (Jev via /zen/v1/systemone)', () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -29,6 +29,37 @@ describe('OpenCode Zen (Jev via /zen/v1/systemone)', () => {
     process.env.AI_GATEWAY_API_KEY = 'g';
     expect(resolveProvider('auto')).toBe('gateway');
     expect(makeBackend(defaultPolicy(), 'opencode-zen').name).toBe('opencode-zen:jev-1.13-free');
+    process.env = saved;
+  });
+});
+
+describe('local backend (0.18): a /v1/systemone server on this machine', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('posts the TypeSafe request shape to the configured endpoint and never leaves the machine by default', async () => {
+    const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
+      expect(url).toBe('http://127.0.0.1:8000/v1/systemone');
+      expect((init.headers as Record<string, string>).authorization).toBe('Bearer local');
+      expect(JSON.parse(String(init.body)).model).toBe('von-1.0.0');
+      return new Response(JSON.stringify({ answers: { destructive: { type: 'noul', noul: 0.2 } } }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const policy = defaultPolicy();
+    policy.backend = { ...policy.backend, provider: 'local', model: 'von-1.0.0' };
+    const b = makeBackend(policy);
+    expect(b.name).toBe('local:von-1.0.0');
+    expect(await b.evaluate({ tool: 'Bash' }, { destructive: { type: 'boolean', instructions: 'd' } })).toEqual({ destructive: { type: 'boolean', probability: 0.2 } });
+  });
+
+  it('honours backend.endpoint, rejects it for other providers, and auto never picks local', () => {
+    const policy = defaultPolicy();
+    policy.backend = { ...policy.backend, provider: 'local', endpoint: 'http://127.0.0.1:8009/v1/systemone' };
+    expect(() => validatePolicy(policy)).not.toThrow();
+    policy.backend = { ...policy.backend, provider: 'typesafe', endpoint: 'http://127.0.0.1:8009/v1/systemone' };
+    expect(() => validatePolicy(policy)).toThrow(/local only/);
+    const saved = { ...process.env };
+    for (const k of ['TYPESAFE_API_KEY', 'OPENROUTER_API_KEY', 'AI_GATEWAY_API_KEY', 'OPENCODE_API_KEY']) delete process.env[k];
+    expect(() => resolveProvider('auto')).toThrow(/no API key/);
     process.env = saved;
   });
 });

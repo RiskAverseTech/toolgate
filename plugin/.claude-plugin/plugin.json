@@ -1,7 +1,7 @@
 {
   "name": "toolgate",
   "displayName": "toolgate",
-  "version": "0.17.1",
+  "version": "0.18.0",
   "description": "Tool-call firewall for Claude Code built on TypeSafe's Jev: seven risk questions, an action ledger that judges files at write time, floors on the axes that must not soften, and ask instead of allow when the model is unreachable. Every verdict logged with its probabilities.",
   "author": { "name": "Jaz", "email": "jaz@riskaversetechcompany.com", "url": "https://github.com/RiskAverseTech/toolgate" },
   "homepage": "https://github.com/RiskAverseTech/toolgate",
