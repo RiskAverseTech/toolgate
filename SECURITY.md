@@ -7,7 +7,6 @@ toolgate is a tool-call firewall for AI coding agents. It is **defense in depth,
 Please report suspected vulnerabilities privately, not in a public issue.
 
 - Preferred: open a private report via GitHub Security Advisories — <https://github.com/RiskAverseTech/toolgate/security/advisories/new>.
-- Or email **security@riskaversetechcompany.com** with "toolgate" in the subject.
 
 Include what you found, the version (`toolgate --help` shows it; or the npm/git version), a minimal way to reproduce, and the impact you expect. A classification transcript (`toolgate check --tool … --input=… --task …`, which never executes the command) is the most useful attachment.
 
